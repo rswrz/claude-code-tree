@@ -20,10 +20,12 @@ case letter in it makes the whole term case-sensitive.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-__all__ = ["TermType", "Term", "Query", "parse", "matches", "spans", "toggle_token"]
+__all__ = ["TermType", "Term", "Query", "parse", "matches", "spans", "toggle_token",
+           "cycle_token"]
 
 # fzf splits the query on runs of plain spaces; the no-break space inside a
 # filter token therefore never breaks it into two terms.
@@ -154,6 +156,18 @@ def toggle_token(query: str, token: str) -> str:
     if token:
         fields = [f for f in fields if f != token] if token in fields else fields + [token]
     return " ".join(fields)
+
+
+def cycle_token(query: str, values: Sequence[str]) -> str:
+    """Advance the query through a set of mutually exclusive tokens."""
+    fields = [f for f in query.split(" ") if f]
+    for i, field in enumerate(fields):
+        if field in values:
+            # the successor takes the same slot, and the last one leaves none behind
+            nxt = values.index(field) + 1
+            fields[i:i + 1] = values[nxt:nxt + 1]
+            return " ".join(fields)
+    return " ".join(fields + list(values[:1]))
 
 
 def _leading(s: str) -> int:

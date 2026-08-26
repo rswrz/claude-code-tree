@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from cct.fuzzy import Query, TermType, matches, parse, spans, toggle_token
+from cct.fuzzy import Query, TermType, cycle_token, matches, parse, spans, toggle_token
 
 
 def m(query: str, text: str) -> bool:
@@ -187,6 +187,33 @@ class TestToggleToken:
 
     def test_matches_whole_fields_only(self):
         assert toggle_token("bg:done", "bg:") == "bg:done bg:"
+
+
+class TestCycleToken:
+    CYCLE = ("bg:", "bg:blocked", "bg:failed", "bg:done")
+
+    def test_enters_the_cycle_at_the_first_value(self):
+        assert cycle_token("", self.CYCLE) == "bg:"
+        assert cycle_token("adr", self.CYCLE) == "adr bg:"
+
+    def test_each_step_replaces_the_one_before_it(self):
+        query = ""
+        walked = []
+        for _ in self.CYCLE:
+            query = cycle_token(query, self.CYCLE)
+            walked.append(query)
+        assert walked == list(self.CYCLE)
+
+    def test_the_last_value_falls_out_of_the_cycle(self):
+        assert cycle_token("bg:done", self.CYCLE) == ""
+        assert cycle_token("adr bg:done", self.CYCLE) == "adr"
+
+    def test_the_token_keeps_its_place_among_the_other_terms(self):
+        assert cycle_token("adr bg: ACME-1", self.CYCLE) == "adr bg:blocked ACME-1"
+        assert cycle_token("adr bg:done ACME-1", self.CYCLE) == "adr ACME-1"
+
+    def test_a_term_that_is_not_in_the_cycle_is_left_alone(self):
+        assert cycle_token("bg:running", self.CYCLE) == "bg:running bg:"
 
 
 def test_query_is_hashable_and_reusable():

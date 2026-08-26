@@ -13,7 +13,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from cct import __version__
-from cct.model import Sort
+from cct.model import Group, Sort
 from cct.theme import PALETTE, Style
 
 if TYPE_CHECKING:
@@ -42,6 +42,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=[s.value for s in Sort],
         default=Sort.RECENT.value,
         help="initial sort order (default: recent)",
+    )
+    parser.add_argument(
+        "--group",
+        choices=[g.value for g in Group],
+        default=Group.NONE.value,
+        help="group the roots into labelled blocks (default: none)",
     )
     parser.add_argument(
         "--no-cache",
@@ -124,9 +130,8 @@ def _terminal_width(explicit: int | None) -> int:
 
 
 def _run_print(args: argparse.Namespace) -> int:
-    from cct.layout import build_rows
+    from cct.layout import build_list
     from cct.store import scan_once
-    from cct.tree import walk
 
     abs_dir = _resolve_target(args.dir)
     sort = Sort(args.sort)
@@ -137,8 +142,7 @@ def _run_print(args: argparse.Namespace) -> int:
         print(f"claude-code-tree: {snap.error}", file=sys.stderr)
         return 1
 
-    tree_rows = walk(snap.roots, snap.children)
-    if not tree_rows:
+    if not snap.roots:
         where = "all projects" if args.all else abs_dir
         print(f"claude-code-tree: no Claude sessions found for {where}", file=sys.stderr)
         return 1
@@ -146,8 +150,9 @@ def _run_print(args: argparse.Namespace) -> int:
     # the TUI reserves two columns for the selection gutter; --print matches it
     # so that a given --width renders exactly what that terminal width would show
     width = max(MIN_PRINT_WIDTH, _terminal_width(args.width) - GUTTER_COLS)
-    rows = build_rows(snap, tree_rows, width, show_project=args.all)
-    for row in rows:
+    listing = build_list(snap, snap.roots, snap.children, width,
+                         show_project=args.all, group=Group(args.group))
+    for row in listing.rows:
         print(_ansi_line(row))
     return 0
 
@@ -176,7 +181,8 @@ def _run_tui(args: argparse.Namespace) -> int:
     abs_dir = _resolve_target(args.dir)
     sort = Sort(args.sort)
     scope = _make_scope(abs_dir=abs_dir, all_projects=args.all)
-    return run(scope, sort=sort, use_cache=not args.no_cache) or 0
+    return run(scope, sort=sort, group=Group(args.group),
+               use_cache=not args.no_cache) or 0
 
 
 def main(argv: list[str] | None = None) -> int:

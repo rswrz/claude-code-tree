@@ -358,6 +358,18 @@ def test_is_live_only_counts_background_agents_with_a_pid():
     assert actions.is_live(session, snap) is True
 
 
+def test_is_live_interactive_only_counts_interactive_sessions_with_a_pid():
+    sid = "u" * 36
+    session = Session(sid=sid)
+    assert actions.is_live_interactive(session, Snapshot()) is False
+    snap = Snapshot(agents={sid: Agent(sid=sid, live=False)})
+    assert actions.is_live_interactive(session, snap) is False
+    snap = Snapshot(agents={sid: Agent(sid=sid, live=True, status="idle")})
+    assert actions.is_live_interactive(session, snap) is True
+    snap = Snapshot(agents={sid: Agent(sid=sid, kind="background", live=True)})
+    assert actions.is_live_interactive(session, snap) is False
+
+
 def test_work_dir_prefers_the_session_cwd(tmp_path):
     real = tmp_path / "repo"
     real.mkdir()

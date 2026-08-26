@@ -140,6 +140,12 @@ def test_siblings_share_the_subtree_ranking():
     assert children["root"] == ["quiet", "busy"]
 
 
+def test_a_sid_missing_from_the_snapshot_contributes_no_recency():
+    root = sess("root", ["a"], mtime=10)
+    recent = tree.subtree_mtime({"root": root}, {"root": ["gone"]}, ["root", "ghost"])
+    assert recent == {"root": 10.0, "gone": 0.0, "ghost": 0.0}
+
+
 def test_sorting_reorders_but_never_flattens():
     root = sess("root", ["a"], mtime=1, users=1)
     child = sess("child", ["a", "b"], mtime=2, users=50)

@@ -136,6 +136,21 @@ def test_the_agents_view_is_always_asked_for_every_project(
     assert agents_calls(stub_claude) == [["agents", "--json", "--all", "--cwd", abs_dir]]
 
 
+def test_a_row_whose_fields_are_not_strings_still_yields_an_agent(fake_home, stub_claude):
+    """The UI hashes state and status, so nothing but a string may reach it."""
+    stub_claude.set_agents([
+        "not a row",
+        {"kind": "background", "state": "done"},                  # no session id
+        {"sessionId": SIDS[0], "kind": "background",
+         "state": {"phase": "working"}, "status": ["idle"], "name": None},
+    ])
+
+    agents = daemon.list_agents()
+
+    assert [a.sid for a in agents] == [SIDS[0]]
+    assert (agents[0].state, agents[0].status, agents[0].name) == ("", "", "")
+
+
 def test_the_agents_view_is_skipped_while_the_daemon_has_not_moved(
         fake_home, fake_project, make_transcript, make_job_state, stub_claude,
         tmp_path):

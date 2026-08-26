@@ -29,6 +29,7 @@ class Style(Enum):
     PROMPT = "prompt"         # "session >"
     COUNTER = "counter"       # "103/122"
     HEADER = "header"         # the cwd line
+    GROUP = "group"           # group header splicing the session list
     FOOTER = "footer"         # key legend
     BORDER = "border"
     QUERY = "query"
@@ -64,6 +65,7 @@ PALETTE: dict[Style, Ink] = {
     Style.PROMPT: Ink(39, bold=True),
     Style.COUNTER: Ink(-1, dim=True),
     Style.HEADER: Ink(-1, dim=True),
+    Style.GROUP: Ink(66, bold=True),
     Style.FOOTER: Ink(-1, bold=True),
     Style.BORDER: Ink(240),
     Style.QUERY: Ink(-1),

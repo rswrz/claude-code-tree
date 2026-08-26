@@ -13,12 +13,15 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .daemon import job_prs
-from .model import Session, Snapshot, TreeRow
+from .group import partition
+from .model import Agent, Group, Session, Snapshot, TreeRow
 from .theme import STATE_STYLE, Row, Style, merge, plain
+from .tree import walk
 
 __all__ = [
     "cwid", "dw", "dtrunc", "dpad", "fmt_age", "fmt_dur", "fmt_ctx",
-    "build_rows", "KW_RE", "PR_KW", "LABEL_MIN",
+    "build_rows", "build_list", "ListRows", "group_header", "KW_RE", "PR_KW",
+    "LABEL_MIN", "MIN_WIDTH", "BR_MAX", "SETTLED", "badge", "stalled",
 ]
 
 NAME_MAX = 60
@@ -28,6 +31,11 @@ LINK_MAX = 12
 PROJ_MAX = 24
 LABEL_MIN = 24
 MIN_WIDTH = 38
+HEADER_INDENT = 2
+
+# background states that no longer expect a worker process; every other state
+# means the job claims to be running
+SETTLED = frozenset({"blocked", "failed", "done", "stopped"})
 
 # issue keys (ABC-123) and the two shapes a pull request is written in
 KW_RE = re.compile(r"\bPR[ -]?\d+\b|#\d+|\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b")
@@ -157,18 +165,27 @@ def _link_tok(s: Session, job: dict) -> str:
     return dtrunc(" ".join(parts), LINK_MAX)
 
 
-def _badge(snap: Snapshot, sid: str) -> tuple[str, Style | None]:
-    a = snap.agents.get(sid)
-    if a is None:
+def stalled(agent: Agent) -> bool:
+    """A background state that claims work with no worker behind it."""
+    return bool(agent.state) and agent.state not in SETTLED and not agent.live
+
+
+def badge(agent: Agent | None) -> tuple[str, Style | None]:
+    """One agent's badge: the text, and the colour that carries liveness.
+
+    The token always spells its colon, so every badge matches the query token
+    that is meant to find it. A stalled job is a broken one rather than a busy
+    one, and the colour is the only place that shows.
+    """
+    if agent is None:
         return "", None
-    if a.kind == "background":
-        text = f"bg:{a.state}" if a.state else "bg"
-        if a.live:
-            text = f"● {text}"
-        return text, STATE_STYLE.get(a.state)
-    if a.live:
-        text = f"● live:{a.status}" if a.status else "● live"
-        return text, STATE_STYLE.get(a.status, STATE_STYLE["live"])
+    if agent.kind == "background":
+        text = f"bg:{agent.state}"
+        if stalled(agent):
+            return text, Style.STATE_BAD
+        return text, STATE_STYLE.get(agent.state)
+    if agent.live:
+        return f"live:{agent.status}", STATE_STYLE.get(agent.status, STATE_STYLE["live"])
     return "", None
 
 
@@ -234,15 +251,16 @@ def build_rows(
     tree_rows: list[TreeRow],
     width: int,
     show_project: bool,
+    now: float | None = None,
 ) -> list[Row]:
     """One padded row per tree line, ready for the screen.
 
     ``width`` is the usable width of the list pane; every row comes back exactly
-    that wide.
+    that wide. ``now`` is the clock the age column reads.
     """
     avail = max(MIN_WIDTH, width)
     order = [c for c in _ORDER if c != "project" or show_project]
-    now = time.time()
+    clock = time.time() if now is None else now
 
     labels: list[tuple[str, str, str, int]] = []   # cell text, prefix, marker, depth
     table: list[dict[str, _Cell]] = []
@@ -254,12 +272,12 @@ def build_rows(
         labels.append((label, tr.prefix, marker, tr.depth))
 
         proj = snap.project_of(tr.sid)
-        btext, bstyle = _badge(snap, tr.sid)
+        btext, bstyle = badge(snap.agents.get(tr.sid))
         table.append({
             "label": _Cell(label + marker, "<", None, "label"),
             "project": _Cell(dtrunc(proj.name if proj else "", PROJ_MAX), "<", Style.PROJECT),
             "users": _Cell("" if s.stub or not s.users else f"{s.users}u", ">"),
-            "age": _Cell("" if s.ghost else fmt_age(s.mtime, now), ">"),
+            "age": _Cell("" if s.ghost else fmt_age(s.mtime, clock), ">"),
             "duration": _Cell("" if s.stub else fmt_dur(s.ts_min, s.ts_max), ">"),
             "context": _Cell("" if s.stub else fmt_ctx(s.ctx), ">"),
             "branch": _Cell(_branch_tok(s), "<", _off_default(s, snap.default_branch)),
@@ -322,3 +340,77 @@ def build_rows(
             out.append((" " * fill, base))
         rows.append(merge(out))
     return rows
+
+
+@dataclass
+class ListRows:
+    rows: list[Row]
+    sids: list[str]           # '' for a group header
+    labels: list[str]         # the block each row belongs to, '' when unblocked
+
+
+def group_header(label: str, n: int, width: int) -> Row:
+    """One block header, as wide as the session rows beside it.
+
+    ``width`` is the usable width of the list pane, clamped the way
+    :func:`build_rows` clamps it.
+    """
+    width = max(MIN_WIDTH, width)
+    lead = " " * HEADER_INDENT
+    count = f" ({n})"
+    # a space stays between the count and the rule, whatever the label costs
+    text = lead + dtrunc(label, max(0, width - len(lead) - dw(count) - 1))
+    fill = max(0, width - dw(text) - dw(count) - 1)
+    return merge([
+        (text, Style.GROUP),
+        (count, Style.COUNTER),
+        (" " + "─" * fill, Style.BORDER),
+    ])
+
+
+def build_list(
+    snap: Snapshot,
+    roots: list[str],
+    children: dict[str, list[str]],
+    width: int,
+    show_project: bool,
+    group: Group = Group.NONE,
+    now: float | None = None,
+) -> ListRows:
+    """The whole session list: group headers spliced into the forest walk.
+
+    ``rows``, ``sids`` and ``labels`` come back the same length, with ``''`` in
+    ``sids`` at every header position and every row's block label in ``labels``;
+    selection and filtering rely on that 1:1 correspondence.
+    """
+    avail = max(MIN_WIDTH, width)
+    parts = partition(snap, roots, children, group, now)
+    # a header over the whole list names nothing the list does not already say
+    lone = len(parts) == 1
+    # the label column earns the space the project column would waste on a value
+    # the header states — but only where a header is drawn to state it
+    if group is Group.PROJECT and not lone:
+        show_project = False
+    blocks: list[tuple[str, list[TreeRow]]] = []
+    for block in parts:
+        # walked per block, so each block's last root draws its own closing connector
+        blocks.append((block.label, walk(block.roots, children)))
+
+    tree_rows = [tr for _, walked in blocks for tr in walked]
+    # one call, so the column widths stay aligned across every block
+    body = build_rows(snap, tree_rows, avail, show_project, now)
+
+    rows: list[Row] = []
+    sids: list[str] = []
+    labels: list[str] = []
+    at = 0
+    for label, walked in blocks:
+        if label and not lone:
+            rows.append(group_header(label, len(walked), avail))
+            sids.append("")
+            labels.append(label)
+        rows.extend(body[at:at + len(walked)])
+        sids.extend(tr.sid for tr in walked)
+        labels.extend(label for _ in walked)
+        at += len(walked)
+    return ListRows(rows=rows, sids=sids, labels=labels)

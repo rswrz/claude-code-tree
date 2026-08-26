@@ -96,7 +96,7 @@ def compute_parents(
     return parents
 
 
-def _subtree_mtime(
+def subtree_mtime(
     sessions: dict[str, Session],
     children: dict[str, list[str]],
     roots: list[str],
@@ -107,14 +107,17 @@ def _subtree_mtime(
         stack = [(root, False)]
         while stack:
             sid, done = stack.pop()
+            kids = children.get(sid) or []
             if done:
-                value = sessions[sid].mtime
-                for child in children[sid]:
+                session = sessions.get(sid)
+                # a sid the snapshot never saw contributes no recency of its own
+                value = session.mtime if session is not None else 0.0
+                for child in kids:
                     value = max(value, recent[child])
                 recent[sid] = value
                 continue
             stack.append((sid, True))
-            for child in children[sid]:
+            for child in kids:
                 stack.append((child, False))
     return recent
 
@@ -148,7 +151,7 @@ def order_forest(
             return (sessions[sid].title.casefold(), sid)
         reverse = False
     elif sort is Sort.RECENT:
-        recent = _subtree_mtime(sessions, children, roots)
+        recent = subtree_mtime(sessions, children, roots)
         def key(sid: str) -> tuple:
             return (recent[sid], sid)
         reverse = True

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Self
 
 
 @dataclass
@@ -66,7 +67,19 @@ class Project:
         return self.label or self.cwd.rstrip("/").rsplit("/", 1)[-1] or self.encoded
 
 
-class Sort(Enum):
+class _Cycling(Enum):
+    """A named mode the UI steps through with a single key. Members only in subclasses."""
+
+    @property
+    def label(self) -> str:
+        return self.value
+
+    def next(self) -> Self:
+        members = list(type(self))
+        return members[(members.index(self) + 1) % len(members)]
+
+
+class Sort(_Cycling):
     """Ordering of roots and of siblings within a tree."""
 
     RECENT = "recent"         # newest session anywhere in the subtree, first
@@ -75,13 +88,13 @@ class Sort(Enum):
     DURATION = "duration"
     NAME = "name"
 
-    @property
-    def label(self) -> str:
-        return self.value
 
-    def next(self) -> "Sort":
-        members = list(Sort)
-        return members[(members.index(self) + 1) % len(members)]
+class Group(_Cycling):
+    """Blocking of the root list. A display dimension, never a sort key."""
+
+    NONE = "none"
+    PROJECT = "project"
+    AGE = "age"
 
 
 @dataclass

@@ -30,6 +30,7 @@ The command is long on purpose; `alias cct='claude-code-tree'` if you type it of
 claude-code-tree [DIR]                sessions under DIR (default: $PWD)
 claude-code-tree --all                start in all-projects scope
 claude-code-tree --sort SORT          recent | turns | context | duration | name
+claude-code-tree --group GROUP        none | project | age
 claude-code-tree --no-cache           ignore the on-disk transcript cache
 claude-code-tree --print [--width N]  render the tree to stdout and exit
 claude-code-tree --preview SID        render one session's preview pane and exit
@@ -48,10 +49,11 @@ claude-code-tree --version
 | Ctrl+X | delete session |
 | Ctrl+T | prune stub sessions |
 | Ctrl+O | open links (PRs, artifacts) |
-| Ctrl+G | toggle the `bg:` query token |
+| Ctrl+G | insert the next agent filter token: `bg:`, `bg:blocked`, `bg:failed`, `bg:done`, `live:`, then none |
 | Ctrl+B | toggle the current branch as a query token |
 | Ctrl+A | toggle scope: this project / all projects |
 | Ctrl+S | cycle sort order |
+| Ctrl+E | cycle grouping: none, project, age |
 | Ctrl+L | force reload |
 | Ctrl+P | toggle preview pane |
 | Space | toggle preview pane, or insert a space when the query is not empty |
@@ -62,6 +64,10 @@ claude-code-tree --version
 | Ctrl+W / Ctrl+U | delete word / clear query |
 | Esc | close preview, else quit |
 | Ctrl+C | quit |
+
+Enter on a live interactive session asks before it resumes it: the session is
+already open in another terminal, and two terminals on one session is rarely
+wanted. Ctrl+F never asks, because a fork is a session of its own.
 
 ## Query syntax
 

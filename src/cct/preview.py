@@ -12,9 +12,9 @@ import os
 import re
 
 from . import daemon, fuzzy, paths, transcript
-from .layout import KW_RE, PR_KW, cwid, dw, fmt_age, fmt_ctx, fmt_dur
-from .model import Snapshot
-from .theme import STATE_STYLE, Row, Style, merge
+from .layout import KW_RE, PR_KW, badge, cwid, dw, fmt_age, fmt_ctx, fmt_dur
+from .model import Agent, Snapshot
+from .theme import Row, Style, merge
 
 __all__ = ["render", "render_job", "wrap", "MSG_KEEP", "MSG_MAX", "TAIL", "HEAD"]
 
@@ -49,9 +49,9 @@ def render_job(sid: str) -> list[Row]:
         [(str(js.get("name") or sid[:8]), Style.BOLD)],
         [(sid, Style.DIM)],
     ]
-    state = js.get("state") or ""
-    if state:
-        out.append([(f"bg:{state}", STATE_STYLE.get(state, Style.NORMAL))])
+    btext, bstyle = badge(Agent(sid=sid, kind="background",
+                                state=js.get("state") or "", live=daemon.is_live(sid)))
+    out.append([(btext, bstyle or Style.NORMAL)])
     out.append([])
     for k in ("detail", "intent", "cwd", "worktreePath", "createdAt", "updatedAt"):
         v = js.get(k)
@@ -317,11 +317,14 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
 
     js = daemon.job_state(sid)
     state = js.get("state") or ""
-    btext = ("bg:" + state if state else "bg") if js else ""
-    if daemon.is_live(sid):
-        btext = f"● {btext}" if btext else "● live"
+    live = daemon.is_live(sid)
+    # the same badge the list draws: a job when the daemon holds job state for
+    # this session, an interactive worker otherwise
+    agent = (Agent(sid=sid, kind="background", state=state, live=live) if js
+             else Agent(sid=sid, live=live))
+    btext, bstyle = badge(agent)
     if btext:
-        out.append([(btext, STATE_STYLE.get(state, Style.NORMAL))])
+        out.append([(btext, bstyle or Style.NORMAL)])
 
     def kv(k: str, v) -> None:
         if v is None:

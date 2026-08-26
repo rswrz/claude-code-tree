@@ -28,6 +28,11 @@ def read_json(path: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _text(value: object) -> str:
+    """One field as a string: the UI hashes and prints these, so nothing else will do."""
+    return value if isinstance(value, str) else ""
+
+
 def _epoch_seconds(value: object) -> float:
     try:
         stamp = float(value)  # type: ignore[arg-type]
@@ -61,13 +66,13 @@ def list_agents(cwd: str | None = None) -> list[Agent]:
             continue
         agents.append(Agent(
             sid=sid,
-            kind=row.get("kind") or "",
-            state=row.get("state") or "",
-            status=row.get("status") or "",
+            kind=_text(row.get("kind")),
+            state=_text(row.get("state")),
+            status=_text(row.get("status")),
             live=row.get("pid") is not None,
-            name=(row.get("name") or "").strip(),
+            name=_text(row.get("name")).strip(),
             started_at=_epoch_seconds(row.get("startedAt")),
-            cwd=row.get("cwd") or "",
+            cwd=_text(row.get("cwd")),
         ))
     return agents
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from cct import fuzzy, preview
+from cct import fuzzy, paths, preview
 from cct.model import Snapshot
 from cct.theme import Row, Style, plain
 
@@ -37,6 +38,16 @@ def tool_turn(n: int = 0, calls: int = 1) -> dict:
     blocks = [{"type": "tool_use", "id": f"t{i}", "name": "Read", "input": {}} for i in range(calls)]
     return {"type": "assistant", "uuid": f"t{n}", "timestamp": iso(n), "cwd": "/repo",
             "message": {"role": "assistant", "model": "claude-opus-5-20260101", "content": blocks}}
+
+
+@pytest.fixture
+def worker(fake_home):
+    """Give a session a live daemon worker, the way the roster records one."""
+
+    def _make(sid: str) -> None:
+        Path(paths.ROSTER).write_text(json.dumps({"workers": {"w0": {"sessionId": sid}}}))
+
+    return _make
 
 
 @pytest.fixture
@@ -102,6 +113,31 @@ class TestHeader:
         rows = preview.render(sid, Snapshot())
         assert text_of(rows)[2] == "bg:blocked"
         assert rows[2][0][1] is Style.STATE_WARN
+
+    def test_the_badge_reads_as_the_list_reads_it(self, transcript, make_job_state, worker):
+        """The pane and the row beside it spell one badge, colour included."""
+        sid = transcript([user("hi")])
+        make_job_state(sid, state="working")
+        rows = preview.render(sid, Snapshot())
+        assert text_of(rows)[2] == "bg:working"
+        assert rows[2][0][1] is Style.STATE_BAD          # no worker behind the state
+
+        worker(sid)
+        rows = preview.render(sid, Snapshot())
+        assert text_of(rows)[2] == "bg:working"
+        assert rows[2][0][1] is Style.STATE_OK
+
+    def test_a_session_the_daemon_holds_a_worker_for_is_live(self, transcript, worker):
+        sid = transcript([user("hi")])
+        worker(sid)
+        rows = preview.render(sid, Snapshot())
+        assert text_of(rows)[2] == "live:"
+        assert rows[2][0][1] is Style.STATE_OK
+
+    def test_a_session_the_daemon_knows_nothing_about_wears_no_badge(self, transcript):
+        sid = transcript([user("hi")])
+        lines = text_of(preview.render(sid, Snapshot()))
+        assert lines[2].startswith("session ")
 
 
 class TestKeyValues:

@@ -8,6 +8,7 @@ import pytest
 
 from cct.layout import (
     LABEL_MIN,
+    build_list,
     build_rows,
     dpad,
     dtrunc,
@@ -16,7 +17,8 @@ from cct.layout import (
     fmt_ctx,
     fmt_dur,
 )
-from cct.model import Agent, Project, Session, Snapshot, TreeRow
+from cct.group import AGE_LABELS
+from cct.model import Agent, Group, Project, Session, Snapshot, TreeRow
 from cct.theme import Style, plain
 
 T0 = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
@@ -385,31 +387,153 @@ class TestBadge:
         ("failed", "STATE_BAD"), ("working", "STATE_OK"),
     ])
     def test_background_state(self, state, style):
-        snap = snapshot(session("a"),
-                        agents={"a": Agent(sid="a", kind="background", state=state)})
+        snap = snapshot(session("a"), agents={
+            "a": Agent(sid="a", kind="background", state=state, live=True)})
         row = rows_for(snap, flat("a"))[0]
         assert f"bg:{state}" in plain(row)
         assert style_at(row, f"bg:{state}") == style
 
-    def test_a_live_background_job_gets_a_dot(self):
-        snap = snapshot(session("a"),
-                        agents={"a": Agent(sid="a", kind="background", state="working", live=True)})
-        assert "● bg:working" in plain(rows_for(snap, flat("a"))[0])
+    def test_a_working_background_job_without_a_worker_reads_as_broken(self):
+        snap = snapshot(session("a"), agents={
+            "a": Agent(sid="a", kind="background", state="working")})
+        row = rows_for(snap, flat("a"))[0]
+        assert "bg:working" in plain(row)
+        assert style_at(row, "bg:working") == "STATE_BAD"
+
+    @pytest.mark.parametrize("live", [True, False])
+    @pytest.mark.parametrize("state,style", [
+        ("blocked", "STATE_WARN"), ("done", "STATE_DONE"),
+    ])
+    def test_a_settled_background_job_ignores_liveness(self, state, style, live):
+        snap = snapshot(session("a"), agents={
+            "a": Agent(sid="a", kind="background", state=state, live=live)})
+        assert style_at(rows_for(snap, flat("a"))[0], f"bg:{state}") == style
 
     def test_stateless_background_job(self):
+        # the colon is what makes the badge match the 'bg:' filter that counts it
         snap = snapshot(session("a"), agents={"a": Agent(sid="a", kind="background")})
-        assert "bg" in plain(rows_for(snap, flat("a"))[0])
+        assert "bg:" in plain(rows_for(snap, flat("a"))[0])
 
     def test_a_live_interactive_session(self):
         snap = snapshot(session("a"),
                         agents={"a": Agent(sid="a", status="waiting", live=True)})
         row = rows_for(snap, flat("a"))[0]
-        assert "● live:waiting" in plain(row)
-        assert style_at(row, "● live:waiting") == "STATE_WARN"
+        assert "live:waiting" in plain(row)
+        assert style_at(row, "live:waiting") == "STATE_WARN"
+
+    def test_statusless_live_session(self):
+        snap = snapshot(session("a"), agents={"a": Agent(sid="a", live=True)})
+        row = rows_for(snap, flat("a"))[0]
+        assert "live:" in plain(row)
+        assert style_at(row, "live:") == "STATE_OK"
 
     def test_an_interactive_session_without_a_pid_gets_no_badge(self):
         snap = snapshot(session("a"), agents={"a": Agent(sid="a", status="waiting")})
         assert "live" not in plain(rows_for(snap, flat("a"))[0])
+
+
+class TestGrouping:
+    NOW = 2_000_000.0
+
+    def snap(self):
+        return snapshot(
+            session("a", mtime=self.NOW - 3600),
+            session("b", mtime=self.NOW - 20 * 86400),
+            session("c", mtime=self.NOW - 3600),
+            projects={"a": Project(encoded="-webapp", path="/p/webapp",
+                                   cwd="/repo/webapp", label="webapp"),
+                      "b": Project(encoded="-api", path="/p/api", cwd="/repo/api",
+                                   label="api"),
+                      "c": Project(encoded="-webapp", path="/p/webapp",
+                                   cwd="/repo/webapp", label="webapp")})
+
+    def listing(self, group, roots=None, children=None, width=120, project=True):
+        return build_list(self.snap(), roots or ["a", "b"], children or {"a": [], "b": []},
+                          width, project, group, now=self.NOW)
+
+    def test_no_grouping_draws_no_header(self):
+        listing = self.listing(Group.NONE)
+        assert listing.sids == ["a", "b"]
+        assert len(listing.rows) == 2
+
+    def test_a_header_carries_no_sid(self):
+        listing = self.listing(Group.PROJECT)
+        assert len(listing.rows) == len(listing.sids)
+        assert listing.sids == ["", "a", "", "b"]
+
+    def test_a_header_names_its_block_and_counts_it(self):
+        rows = self.listing(Group.PROJECT).rows
+        assert plain(rows[0]).startswith("  webapp (1) ─")
+        assert plain(rows[2]).startswith("  api (1) ─")
+
+    def test_a_header_counts_the_whole_block_not_its_roots(self):
+        listing = self.listing(Group.PROJECT, children={"a": ["c"], "b": [], "c": []})
+        assert plain(listing.rows[0]).startswith("  webapp (2) ")
+        assert listing.sids == ["", "a", "c", "", "b"]
+
+    def test_every_row_carries_the_label_of_its_block(self):
+        listing = self.listing(Group.PROJECT)
+        assert listing.labels == ["webapp", "webapp", "api", "api"]
+
+    def test_a_worktree_row_carries_its_repo_and_not_the_worktree_name(self):
+        snap = snapshot(session("a"), session("b"), projects={
+            "a": Project(encoded="-wt-one", path="/p/wt-one",
+                         cwd="/repo/webapp/.claude/worktrees/wt-one", label="wt-one"),
+            "b": Project(encoded="-api", path="/p/api", cwd="/repo/api", label="api")})
+        listing = build_list(snap, ["a", "b"], {"a": [], "b": []}, 120, True, Group.PROJECT)
+        assert plain(listing.rows[0]).startswith("  webapp (1) ")
+        assert listing.labels == ["webapp", "webapp", "api", "api"]
+
+    def test_a_header_is_styled_label_count_rule(self):
+        row = self.listing(Group.PROJECT).rows[0]
+        assert styled(row) == [("  webapp", "GROUP"), (" (1)", "COUNTER"),
+                               (" " + "─" * 107, "BORDER")]
+
+    def test_a_long_label_is_truncated(self):
+        name = "l" * 80
+        snap = snapshot(session("a"), session("b"), projects={
+            "a": Project(encoded="-x", path="/x", cwd=f"/repo/{name}", label=name),
+            "b": Project(encoded="-y", path="/y", cwd="/repo/short", label="short")})
+        row = build_list(snap, ["a", "b"], {"a": [], "b": []}, 40, False, Group.PROJECT).rows[0]
+        assert "…" in plain(row) and dw(plain(row)) == 40
+
+    @pytest.mark.parametrize("group", [Group.PROJECT, Group.AGE])
+    def test_a_single_block_draws_no_header(self, group):
+        listing = self.listing(group, roots=["a"], children={"a": []})
+        assert listing.sids == ["a"]
+        assert len(listing.rows) == 1
+
+    def test_a_single_block_still_labels_its_rows(self):
+        # nothing is drawn, but the block is still what the rows belong to
+        listing = self.listing(Group.PROJECT, roots=["a"], children={"a": []})
+        assert listing.labels == ["webapp"]
+
+    def test_a_single_block_keeps_the_project_column(self):
+        # with no header drawn, the column is the only thing naming the project
+        listing = self.listing(Group.PROJECT, roots=["a"], children={"a": []})
+        assert "webapp" in plain(listing.rows[0])
+
+    @pytest.mark.parametrize("group", [Group.NONE, Group.PROJECT, Group.AGE])
+    def test_every_row_is_exactly_the_given_width(self, group):
+        for row in self.listing(group, width=100).rows:
+            assert dw(plain(row)) == 100
+
+    def test_age_blocks_follow_the_subtree(self):
+        listing = self.listing(Group.AGE)
+        assert plain(listing.rows[0]).startswith(f"  {AGE_LABELS[0]} (1) ")
+        assert plain(listing.rows[2]).startswith(f"  {AGE_LABELS[2]} (1) ")
+
+    def test_the_given_clock_governs_the_age_column_too(self):
+        row = plain(self.listing(Group.AGE).rows[1])
+        assert "1h ago" in row
+
+    def test_grouping_by_project_gives_the_column_back_to_the_label(self):
+        rows = self.listing(Group.PROJECT).rows
+        assert "webapp" in plain(rows[0])
+        assert "webapp" not in plain(rows[1])
+
+    def test_grouping_by_age_keeps_the_project_column(self):
+        assert "webapp" in plain(self.listing(Group.AGE).rows[1])
 
 
 def test_a_session_missing_from_the_snapshot_still_renders():

@@ -384,6 +384,12 @@ def is_live(session: Session, snap: Snapshot) -> bool:
     return bool(agent and agent.live and agent.kind == "background")
 
 
+def is_live_interactive(session: Session, snap: Snapshot) -> bool:
+    """An interactive session with a pid: another terminal already has it open."""
+    agent = snap.agents.get(session.sid)
+    return bool(agent and agent.live and agent.kind != "background")
+
+
 def resume_command(session: Session, live: bool = False) -> list[str]:
     if live:
         return [CLAUDE, "attach", session.sid[:8]]
