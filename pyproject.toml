@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-code-tree"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Terminal UI that browses Claude Code sessions as a fork tree"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
     "Topic :: Utilities",
 ]
@@ -36,6 +37,10 @@ Issues = "https://github.com/rswrz/claude-code-tree/issues"
 
 [project.scripts]
 claude-code-tree = "cct.cli:main"
+
+# single source of truth for the version: cct.__version__
+[tool.hatch.version]
+path = "src/cct/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cct"]
