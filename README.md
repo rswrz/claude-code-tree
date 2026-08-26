@@ -11,6 +11,12 @@ Python 3.11+, standard library only, no external binaries.
 ## Install
 
 ```
+brew install rswrz/tap/claude-code-tree
+```
+
+or
+
+```
 pipx install git+https://github.com/rswrz/claude-code-tree.git
 ```
 
