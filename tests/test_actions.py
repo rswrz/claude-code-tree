@@ -9,6 +9,7 @@ import pytest
 
 from cct import actions
 from cct.model import Agent, Session, Snapshot
+from cct.transcript import parse_session
 
 
 # --------------------------------------------------------------------------- #
@@ -81,18 +82,18 @@ def test_current_title_takes_the_last_record(home):
         {"type": "user"},
         {"type": "custom-title", "customTitle": "second"},
     ])
-    assert actions.current_title(session) == "second"
+    assert actions.current_title(parse_session(session.path)) == "second"
 
 
 def test_current_title_is_empty_without_a_record(home):
     session = write_session(home, "-tmp-proj", "s" * 36, [{"type": "user"}])
-    assert actions.current_title(session) == ""
+    assert actions.current_title(parse_session(session.path)) == ""
 
 
 def test_rename_appends_and_round_trips(home):
     session = write_session(home, "-tmp-proj", "s" * 36, [{"type": "user"}])
     assert actions.rename(session, "  a new name  ") is None
-    assert actions.current_title(session) == "a new name"
+    assert actions.current_title(parse_session(session.path)) == "a new name"
     last = json.loads(open(session.path).read().splitlines()[-1])
     assert last == {"type": "custom-title", "customTitle": "a new name", "sessionId": session.sid}
 
@@ -181,16 +182,6 @@ def test_perform_delete_falls_back_to_stop_then_rm(home, monkeypatch, claude_bin
     assert [s.ok for s in report.steps] == [False, True, False]
     assert "Background session" in actions.delete(session, snap).lines()
     assert not os.path.exists(session.path)
-
-
-def test_perform_delete_dry_run_touches_nothing(home, monkeypatch, claude_bin):
-    fake_paths(monkeypatch, home)
-    session = write_session(home, "-tmp-proj", "g" * 36, [])
-    report = actions.perform_delete(actions.delete(session, Snapshot(), dry_run=True))
-
-    assert os.path.exists(session.path)
-    assert report.removed == [session.path]
-    assert not claude_bin.exists()
 
 
 def test_delete_derives_the_encoded_dir_from_the_project_dir(home, monkeypatch):
@@ -348,13 +339,3 @@ def test_work_dir_prefers_the_session_cwd(tmp_path):
     assert actions.work_dir(session, Snapshot(), "/nowhere") == str(real)
     gone = Session(sid="q" * 36, cwd=str(tmp_path / "vanished"))
     assert actions.work_dir(gone, Snapshot(), "/fallback") == "/fallback"
-
-
-def test_fmt_age_matches_the_reference_buckets():
-    now = 1_000_000.0
-    assert actions.fmt_age(now - 5, now) == "5s ago"
-    assert actions.fmt_age(now - 300, now) == "5m ago"
-    assert actions.fmt_age(now - 7200, now) == "2h ago"
-    assert actions.fmt_age(now - 86400 * 3, now) == "3d ago"
-    assert actions.fmt_age(now - 86400 * 60, now) == "2mo ago"
-    assert actions.fmt_age(now - 86400 * 800, now) == "2y ago"

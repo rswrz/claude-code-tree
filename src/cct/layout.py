@@ -14,12 +14,11 @@ from datetime import datetime
 
 from .daemon import job_prs
 from .model import Session, Snapshot, TreeRow
-from .theme import STATE_STYLE, Row, Style, plain
+from .theme import STATE_STYLE, Row, Style, merge, plain
 
 __all__ = [
-    "dw", "dtrunc", "dpad", "fmt_age", "fmt_dur", "fmt_ctx",
-    "build_rows", "plain_text",
-    "NAME_MAX", "BR_MAX", "WT_MAX", "LINK_MAX", "PROJ_MAX", "LABEL_MIN", "MIN_WIDTH",
+    "cwid", "dw", "dtrunc", "dpad", "fmt_age", "fmt_dur", "fmt_ctx",
+    "build_rows", "KW_RE", "PR_KW", "LABEL_MIN",
 ]
 
 NAME_MAX = 60
@@ -35,15 +34,34 @@ KW_RE = re.compile(r"\bPR[ -]?\d+\b|#\d+|\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b")
 PR_KW = re.compile(r"^(?:#\d+|PR[ -]?\d+)$")
 
 
+# Every list row and every preview line is measured character by character, and
+# the three unicodedata lookups are the expensive part; one entry per distinct
+# character keeps the draw loop out of them.
+_CWID: dict[str, int] = {}
+
+
 def cwid(ch: str) -> int:
-    if unicodedata.category(ch) == "Mn" or unicodedata.combining(ch):
-        return 0
-    return 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+    """Display width of one character in terminal cells."""
+    width = _CWID.get(ch)
+    if width is None:
+        if unicodedata.category(ch) == "Mn" or unicodedata.combining(ch):
+            width = 0
+        else:
+            width = 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+        _CWID[ch] = width
+    return width
 
 
 def dw(s: str) -> int:
     """Display width in terminal cells."""
-    return sum(cwid(c) for c in s)
+    if s.isascii():
+        return len(s)
+    total = 0
+    get = _CWID.get
+    for ch in s:
+        width = get(ch)
+        total += cwid(ch) if width is None else width
+    return total
 
 
 def dtrunc(s: str, n: int) -> str:
@@ -101,10 +119,6 @@ def fmt_ctx(n: int | None) -> str:
     if n < 1000:
         return str(n)
     return f"{n / 1000:.0f}k"
-
-
-def plain_text(row: Row) -> str:
-    return plain(row)
 
 
 @dataclass
@@ -211,17 +225,8 @@ def _label_spans(cell: str, prefix: str, marker: str, base: Style) -> Row:
     if prefix and cell.startswith(prefix):
         for i in range(len(prefix)):
             styles[i] = Style.TREE
-    return _runs(cell, styles)
-
-
-def _runs(text: str, styles: list[Style]) -> Row:
-    out: Row = []
-    for ch, st in zip(text, styles):
-        if out and out[-1][1] is st:
-            out[-1] = (out[-1][0] + ch, st)
-        else:
-            out.append((ch, st))
-    return out
+    # one span per character; build_rows merges the whole row in a single pass
+    return list(zip(cell, styles))
 
 
 def build_rows(
@@ -315,17 +320,5 @@ def build_rows(
         fill = avail - dw(plain(out))
         if fill > 0:
             out.append((" " * fill, base))
-        rows.append(_compact(out))
+        rows.append(merge(out))
     return rows
-
-
-def _compact(row: Row) -> Row:
-    out: Row = []
-    for text, st in row:
-        if not text:
-            continue
-        if out and out[-1][1] is st:
-            out[-1] = (out[-1][0] + text, st)
-        else:
-            out.append((text, st))
-    return out

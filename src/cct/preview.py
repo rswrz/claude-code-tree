@@ -7,16 +7,14 @@ showing).
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
-from datetime import datetime
 
-from . import daemon, fuzzy, paths
-from .layout import KW_RE, PR_KW, dw, fmt_age, fmt_ctx, fmt_dur
+from . import daemon, fuzzy, paths, transcript
+from .layout import KW_RE, PR_KW, cwid, dw, fmt_age, fmt_ctx, fmt_dur
 from .model import Snapshot
-from .theme import STATE_STYLE, Row, Style
+from .theme import STATE_STYLE, Row, Style, merge
 
 __all__ = ["render", "render_job", "wrap", "MSG_KEEP", "MSG_MAX", "TAIL", "HEAD"]
 
@@ -44,7 +42,7 @@ def render(sid: str, snap: Snapshot, query: str | fuzzy.Query | None = None) -> 
 
 def render_job(sid: str) -> list[Row]:
     """Fallback view for a session the daemon knows but no transcript covers."""
-    js = daemon.read_json(os.path.join(paths.job_dir(sid), "state.json"))
+    js = daemon.job_state(sid)
     if not js:
         return []
     out: list[Row] = [
@@ -85,7 +83,7 @@ def _wrap_row(row: Row, width: int) -> list[Row]:
     limit = width
     for text, style in row:
         for ch in text:
-            c = dw(ch)
+            c = cwid(ch)
             if used + c > limit:
                 out.append(line)
                 line = [(WRAP_SIGN, Style.DIM)]
@@ -104,10 +102,7 @@ def _find_path(sid: str, snap: Snapshot) -> str:
     s = snap.sessions.get(sid)
     if s is not None and s.path and os.path.exists(s.path):
         return s.path
-    hits = glob.glob(os.path.join(paths.PROJECTS_DIR, "*", sid + ".jsonl"))
-    return max(hits, key=os.path.getmtime) if hits else ""
-
-
+    return paths.find_transcript(sid)
 
 
 def _records(buf: bytes, drop_last: bool) -> list[dict]:
@@ -144,21 +139,14 @@ def _load(path: str) -> tuple[list[dict], list[dict], bool]:
 
 
 def _text_of(o: dict) -> tuple[str, int]:
+    """The turn's text, plus how many tool blocks it carried."""
     content = (o.get("message") or {}).get("content")
-    parts: list[str] = []
     tools = 0
-    if isinstance(content, str):
-        parts.append(content)
-    elif isinstance(content, list):
+    if isinstance(content, list):
         for blk in content:
-            if not isinstance(blk, dict):
-                continue
-            bt = blk.get("type")
-            if bt == "text":
-                parts.append(blk.get("text") or "")
-            elif bt in ("tool_use", "tool_result"):
+            if isinstance(blk, dict) and blk.get("type") in ("tool_use", "tool_result"):
                 tools += 1
-    return " ".join(" ".join(parts).split()), tools
+    return " ".join(transcript.block_text(content).split()), tools
 
 
 def _short_model(m: str) -> str:
@@ -172,13 +160,6 @@ def _short_model(m: str) -> str:
     return s
 
 
-def _parse_ts(ts: str) -> datetime | None:
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
 def _deco(text: str, base: Style, q: fuzzy.Query | None) -> Row:
     styles = [base] * len(text)
     for m in KW_RE.finditer(text):
@@ -189,13 +170,7 @@ def _deco(text: str, base: Style, q: fuzzy.Query | None) -> Row:
         for start, end in fuzzy.spans(q, text):
             for i in range(start, min(end, len(text))):
                 styles[i] = Style.HIT
-    out: Row = []
-    for ch, st in zip(text, styles):
-        if out and out[-1][1] is st:
-            out[-1] = (out[-1][0] + ch, st)
-        else:
-            out.append((ch, st))
-    return out
+    return merge(list(zip(text, styles)))
 
 
 def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
@@ -263,7 +238,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
         elif t in ("user", "assistant"):
             ts = o.get("timestamp")
             if isinstance(ts, str):
-                d = _parse_ts(ts)
+                d = transcript.parse_ts(ts)
                 if d is not None:
                     if ts_min is None or d < ts_min:
                         ts_min = d
@@ -300,8 +275,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
         if t == "assistant" and not o.get("isSidechain"):
             usage = (o.get("message") or {}).get("usage")
             if isinstance(usage, dict):
-                ctx = sum(usage.get(k) or 0 for k in
-                          ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+                ctx = sum(usage.get(k) or 0 for k in transcript.USAGE_KEYS)
         if o.get("isMeta"):
             continue
         body, tools = _text_of(o)
@@ -341,7 +315,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
     if not any(o.get("type") in ("user", "assistant") for o in recs):
         out.append([("∅ transcript holds no messages — this session cannot be resumed", Style.DIM)])
 
-    js = daemon.read_json(os.path.join(paths.job_dir(sid), "state.json"))
+    js = daemon.job_state(sid)
     state = js.get("state") or ""
     btext = ("bg:" + state if state else "bg") if js else ""
     if daemon.is_live(sid):

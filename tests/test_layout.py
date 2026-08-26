@@ -15,10 +15,9 @@ from cct.layout import (
     fmt_age,
     fmt_ctx,
     fmt_dur,
-    plain_text,
 )
 from cct.model import Agent, Project, Session, Snapshot, TreeRow
-from cct.theme import Style
+from cct.theme import Style, plain
 
 T0 = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
 
@@ -32,7 +31,7 @@ def style_at(row, needle: str) -> str:
     for text, style in row:
         if needle in text:
             return style.name
-    raise AssertionError(f"{needle!r} not in {plain_text(row)!r}")
+    raise AssertionError(f"{needle!r} not in {plain(row)!r}")
 
 
 def session(sid: str, **kw) -> Session:
@@ -154,14 +153,14 @@ class TestColumns:
         snap = snapshot(session("a"), session("b"))
         tree = [TreeRow("a", "", "├─ ", 0), TreeRow("b", "", "└─ ", 0)]
         for row in rows_for(snap, tree, width=100):
-            assert dw(plain_text(row)) == 100
+            assert dw(plain(row)) == 100
 
     def test_column_order(self):
         s = session("a", users=29, ctx=459_000, branch="feat/x", worktree="wt",
                     prs={353}, frames=2)
         snap = snapshot(s, agents={"a": Agent(sid="a", kind="background", state="done")},
                         default_branch="main")
-        text = plain_text(rows_for(snap, [TreeRow("a", "", "├─ ", 0)])[0]).rstrip()
+        text = plain(rows_for(snap, [TreeRow("a", "", "├─ ", 0)])[0]).rstrip()
         fields = [f for f in text.split("  ") if f]
         assert fields[0].startswith("├─ some session")
         assert [f.strip() for f in fields[1:]] == [
@@ -171,19 +170,19 @@ class TestColumns:
     def test_empty_columns_disappear(self):
         s = session("a", branch="", ctx=None, users=0, ts_max=T0)
         snap = snapshot(s)
-        text = plain_text(rows_for(snap, flat("a"))[0])
+        text = plain(rows_for(snap, flat("a"))[0])
         assert "⎇" not in text and "u " not in text
 
     def test_project_column_sits_between_label_and_users(self):
         s = session("a")
         snap = snapshot(s, projects={"a": Project(encoded="-x", path="/x", label="webapp")})
-        text = plain_text(rows_for(snap, flat("a"), project=True)[0])
+        text = plain(rows_for(snap, flat("a"), project=True)[0])
         assert text.index("webapp") < text.index("3u")
 
     def test_project_column_is_absent_when_not_requested(self):
         s = session("a")
         snap = snapshot(s, projects={"a": Project(encoded="-x", path="/x", label="webapp")})
-        assert "webapp" not in plain_text(rows_for(snap, flat("a"))[0])
+        assert "webapp" not in plain(rows_for(snap, flat("a"))[0])
 
     def test_last_column_is_right_trimmed_before_the_final_fill(self):
         s = session("a", branch="", ctx=None)
@@ -192,7 +191,7 @@ class TestColumns:
         tree = [TreeRow("a", "", "├─ ", 0), TreeRow("b", "", "└─ ", 0)]
         # the age column is last here; both rows still end flush at the width
         for row in rows_for(snap, tree, width=100):
-            assert dw(plain_text(row)) == 100
+            assert dw(plain(row)) == 100
 
 
 class TestDegradation:
@@ -203,14 +202,14 @@ class TestDegradation:
         return snapshot(s, default_branch="main")
 
     def test_wide_terminal_keeps_everything(self):
-        text = plain_text(rows_for(self.full(), flat("a"), width=160)[0])
+        text = plain(rows_for(self.full(), flat("a"), width=160)[0])
         for token in ("29u", "1h0m", "459k", "⎇", "#353"):
             assert token in text
 
     def test_duration_goes_first(self):
         snap = self.full()
-        wide = plain_text(rows_for(snap, flat("a"), width=160)[0])
-        narrow = plain_text(rows_for(snap, flat("a"), width=90)[0])
+        wide = plain(rows_for(snap, flat("a"), width=160)[0])
+        narrow = plain(rows_for(snap, flat("a"), width=90)[0])
         assert "1h0m" in wide and "1h0m" not in narrow
         assert "459k" in narrow
 
@@ -218,7 +217,7 @@ class TestDegradation:
         snap = self.full()
         dropped = []
         for width in (90, 84, 78, 42):
-            text = plain_text(rows_for(snap, flat("a"), width=width)[0])
+            text = plain(rows_for(snap, flat("a"), width=width)[0])
             dropped.append([t for t in ("1h0m", "459k", "⎇", "ago") if t not in text])
         assert dropped[0] == ["1h0m"]
         assert dropped[1] == ["1h0m", "459k"]
@@ -226,49 +225,49 @@ class TestDegradation:
         assert dropped[3] == ["1h0m", "459k", "⎇", "ago"]
 
     def test_label_stays_above_the_minimum_while_columns_remain(self):
-        text = plain_text(rows_for(self.full(), flat("a"), width=44)[0])
+        text = plain(rows_for(self.full(), flat("a"), width=44)[0])
         label = text.split("  ")[0]
         assert dw(label) >= LABEL_MIN
 
     def test_undroppable_columns_survive_an_impossibly_narrow_terminal(self):
         row = rows_for(self.full(), flat("a"), width=10)[0]
-        assert "29u" in plain_text(row)
-        assert dw(plain_text(row)) >= 38
+        assert "29u" in plain(row)
+        assert dw(plain(row)) >= 38
 
 
 class TestLabel:
     def test_title_precedence(self):
         s = session("a", custom="custom", ai="ai", first="first")
-        assert "custom" in plain_text(rows_for(snapshot(s), flat("a"))[0])
+        assert "custom" in plain(rows_for(snapshot(s), flat("a"))[0])
         s = session("b", ai="ai", first="first")
-        assert "ai" in plain_text(rows_for(snapshot(s), flat("b"))[0])
+        assert "ai" in plain(rows_for(snapshot(s), flat("b"))[0])
 
     def test_long_titles_are_truncated_to_name_max(self):
         s = session("a", first="x" * 200)
-        text = plain_text(rows_for(snapshot(s), flat("a"), width=200)[0])
+        text = plain(rows_for(snapshot(s), flat("a"), width=200)[0])
         assert "…" in text
         assert text.split("  ")[0].count("x") <= 60
 
     def test_stub_marker(self):
         s = session("a", stub=True)
         row = rows_for(snapshot(s), flat("a"))[0]
-        assert " ∅" in plain_text(row)
+        assert " ∅" in plain(row)
         assert style_at(row, "∅") == "MARKER"
 
     def test_ghost_marker(self):
         s = session("a", ghost=True)
         row = rows_for(snapshot(s), flat("a"))[0]
-        assert " ⚠ no transcript" in plain_text(row)
+        assert " ⚠ no transcript" in plain(row)
         assert style_at(row, "⚠") == "MARKER"
 
     def test_a_stub_shows_no_turn_columns(self):
         s = session("a", stub=True)
-        text = plain_text(rows_for(snapshot(s), flat("a"))[0])
+        text = plain(rows_for(snapshot(s), flat("a"))[0])
         assert "3u" not in text and "459k" not in text and "1h0m" not in text
 
     def test_a_ghost_shows_no_age(self):
         s = session("a", ghost=True)
-        assert "ago" not in plain_text(rows_for(snapshot(s), flat("a"))[0])
+        assert "ago" not in plain(rows_for(snapshot(s), flat("a"))[0])
 
     def test_issue_keys_are_highlighted(self):
         s = session("a", first="ACME-316 ADR")
@@ -324,28 +323,28 @@ class TestBranchColumn:
 
     def test_branch_carries_a_no_break_space(self):
         s = session("a", branch="main")
-        assert "⎇\xa0main" in plain_text(rows_for(snapshot(s), flat("a"))[0])
+        assert "⎇\xa0main" in plain(rows_for(snapshot(s), flat("a"))[0])
 
     def test_worktree_is_bracketed(self):
         s = session("a", branch="main", worktree="feature-42-media")
-        assert "⎇\xa0main [feature-42-me…]" in plain_text(rows_for(snapshot(s), flat("a"))[0])
+        assert "⎇\xa0main [feature-42-me…]" in plain(rows_for(snapshot(s), flat("a"))[0])
 
     def test_worktree_without_a_branch_stands_alone(self):
         s = session("a", branch="", worktree="wt")
-        assert "[wt]" in plain_text(rows_for(snapshot(s), flat("a"))[0])
+        assert "[wt]" in plain(rows_for(snapshot(s), flat("a"))[0])
 
 
 class TestLinksColumn:
     def test_a_single_artifact_has_no_count(self):
         s = session("a", frames=1)
         row = rows_for(snapshot(s), flat("a"))[0]
-        assert "⧉" in plain_text(row)
+        assert "⧉" in plain(row)
         assert style_at(row, "⧉") == "ISSUE"
 
     def test_several_artifacts_are_counted(self):
         s = session("a", frames=3)
         row = rows_for(snapshot(s), flat("a"))[0]
-        assert "⧉ 3" in plain_text(row)
+        assert "⧉ 3" in plain(row)
         assert style_at(row, "⧉ 3") == "ISSUE"
 
     def test_one_pr_is_named(self):
@@ -361,24 +360,24 @@ class TestLinksColumn:
     def test_a_count_after_the_artifact_glyph_is_not_read_as_prs(self):
         s = session("a", frames=2, prs={1, 2})
         row = rows_for(snapshot(s), flat("a"))[0]
-        assert "⧉ 2 2 PRs" in plain_text(row)
+        assert "⧉ 2 2 PRs" in plain(row)
         assert style_at(row, "⧉ 2") == "ISSUE"
         assert style_at(row, "2 PRs") == "PR"
 
     def test_pr_numbers_from_the_job_state_are_merged_in(self):
         s = session("a", prs={7})
         snap = snapshot(s, jobs={"a": {"children": [{"kind": "pr", "id": 9}]}})
-        assert "2 PRs" in plain_text(rows_for(snap, flat("a"))[0])
+        assert "2 PRs" in plain(rows_for(snap, flat("a"))[0])
 
     def test_a_job_pr_alone_is_enough(self):
         snap = snapshot(session("a"), jobs={"a": {"children": [
             {"kind": "pr", "href": "https://example.test/x/pull/42"}]}})
-        assert "#42" in plain_text(rows_for(snap, flat("a"))[0])
+        assert "#42" in plain(rows_for(snap, flat("a"))[0])
 
 
 class TestBadge:
     def test_no_agent_no_badge(self):
-        text = plain_text(rows_for(snapshot(session("a")), flat("a"))[0])
+        text = plain(rows_for(snapshot(session("a")), flat("a"))[0])
         assert "bg" not in text and "live" not in text
 
     @pytest.mark.parametrize("state,style", [
@@ -389,33 +388,33 @@ class TestBadge:
         snap = snapshot(session("a"),
                         agents={"a": Agent(sid="a", kind="background", state=state)})
         row = rows_for(snap, flat("a"))[0]
-        assert f"bg:{state}" in plain_text(row)
+        assert f"bg:{state}" in plain(row)
         assert style_at(row, f"bg:{state}") == style
 
     def test_a_live_background_job_gets_a_dot(self):
         snap = snapshot(session("a"),
                         agents={"a": Agent(sid="a", kind="background", state="working", live=True)})
-        assert "● bg:working" in plain_text(rows_for(snap, flat("a"))[0])
+        assert "● bg:working" in plain(rows_for(snap, flat("a"))[0])
 
     def test_stateless_background_job(self):
         snap = snapshot(session("a"), agents={"a": Agent(sid="a", kind="background")})
-        assert "bg" in plain_text(rows_for(snap, flat("a"))[0])
+        assert "bg" in plain(rows_for(snap, flat("a"))[0])
 
     def test_a_live_interactive_session(self):
         snap = snapshot(session("a"),
                         agents={"a": Agent(sid="a", status="waiting", live=True)})
         row = rows_for(snap, flat("a"))[0]
-        assert "● live:waiting" in plain_text(row)
+        assert "● live:waiting" in plain(row)
         assert style_at(row, "● live:waiting") == "STATE_WARN"
 
     def test_an_interactive_session_without_a_pid_gets_no_badge(self):
         snap = snapshot(session("a"), agents={"a": Agent(sid="a", status="waiting")})
-        assert "live" not in plain_text(rows_for(snap, flat("a"))[0])
+        assert "live" not in plain(rows_for(snap, flat("a"))[0])
 
 
 def test_a_session_missing_from_the_snapshot_still_renders():
     row = rows_for(Snapshot(), flat("deadbeef-0000-0000-0000-000000000000"))[0]
-    assert "deadbeef" in plain_text(row)
+    assert "deadbeef" in plain(row)
 
 
 def test_no_rows_at_all():

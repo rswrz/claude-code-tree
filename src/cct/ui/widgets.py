@@ -5,7 +5,7 @@ from __future__ import annotations
 import curses
 
 from cct.layout import dw
-from cct.theme import Row, Style
+from cct.theme import Row, Style, plain
 
 from .screen import Screen, cut
 
@@ -26,10 +26,6 @@ ESCAPE = ("\x1b", "\x03")
 
 def as_row(line: str | Row) -> Row:
     return [(line, Style.NORMAL)] if isinstance(line, str) else list(line)
-
-
-def row_width(row: Row) -> int:
-    return sum(dw(text) for text, _ in row)
 
 
 def box_geometry(
@@ -70,7 +66,7 @@ def edit_line(text: str, key) -> tuple[str, bool]:
 
 def _draw_box(scr: Screen, title: str, body: list[Row]) -> tuple[int, int, int, int]:
     height, width = scr.size
-    content_w = max([row_width(r) for r in body] or [0])
+    content_w = max([dw(plain(r)) for r in body] or [0])
     top, left, box_h, box_w = box_geometry(height, width, content_w, len(body), dw(title) + 2)
     inner_w = box_w - 2 * PAD
     win = scr.stdscr
@@ -140,12 +136,12 @@ def text_input(scr: Screen, title: str, prompt: str, initial: str = "") -> str |
         text, _handled = edit_line(text, key)
 
 
-def picker(scr: Screen, title: str, items: list[str], allow_all: bool = True) -> int | None:
+def picker(scr: Screen, title: str, items: list[str]) -> int | None:
     """Pick one of ``items``. Returns its index, :data:`ALL`, or None."""
     if not items:
         return None
     sel = 0
-    hint = "1-%d%s, Esc cancels" % (len(items), ", a for all" if allow_all else "")
+    hint = "1-%d, a for all, Esc cancels" % len(items)
     while True:
         body: list[Row] = []
         for i, item in enumerate(items):
@@ -158,7 +154,7 @@ def picker(scr: Screen, title: str, items: list[str], allow_all: bool = True) ->
             return None
         if key in ENTER:
             return sel
-        if allow_all and key in ("a", "A"):
+        if key in ("a", "A"):
             return ALL
         if key in (curses.KEY_UP, "\x0b"):
             sel = (sel - 1) % len(items)

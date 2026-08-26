@@ -160,28 +160,3 @@ def parse_session(path: str, sid: str | None = None) -> Session:
     session.stub = not has_turns
     session.hay = " ".join(hay_user + hay_asst)
     return session
-
-
-def read_custom_title(path: str) -> str:
-    """The last ``custom-title`` record wins; that is the name the session shows."""
-    last = ""
-    try:
-        with open(path, errors="replace") as fh:
-            for line in fh:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(rec, dict) and rec.get("type") == "custom-title":
-                    title = rec.get("customTitle")
-                    if isinstance(title, str):
-                        last = title
-    except OSError:
-        return ""
-    return last
-
-
-def append_custom_title(path: str, sid: str, name: str) -> None:
-    record = {"type": "custom-title", "customTitle": name, "sessionId": sid}
-    with open(path, "a") as fh:
-        fh.write(json.dumps(record, separators=(",", ":")) + "\n")

@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 
 from cct import daemon, paths
+from cct.layout import fmt_age
 from cct.model import Session, Snapshot
 
 CLAUDE = "claude"
@@ -48,14 +49,11 @@ class Step:
 class DeletePlan:
     sid: str
     title: str
-    project_dir: str
-    encoded: str
     cwd: str
     daemon_known: bool = False
     job_state: str = ""
     job_worktree: str = ""
     paths: list[str] = field(default_factory=list)
-    dry_run: bool = False
 
     def lines(self) -> list[str]:
         out = [f"Session: {self.title}"]
@@ -184,24 +182,9 @@ def _records(path: str):
         return
 
 
-def fmt_age(mtime: float, now: float | None = None) -> str:
-    diff = (time.time() if now is None else now) - mtime
-    if diff < 60:
-        return f"{int(diff)}s ago"
-    if diff < 3600:
-        return f"{int(diff / 60)}m ago"
-    if diff < 86400:
-        return f"{int(diff / 3600)}h ago"
-    if diff < 86400 * 30:
-        return f"{int(diff / 86400)}d ago"
-    if diff < 86400 * 365:
-        return f"{int(diff / 86400 / 30)}mo ago"
-    return f"{int(diff / 86400 / 365)}y ago"
-
-
 def _encoded_of(session: Session) -> str:
     if session.project_dir:
-        return os.path.basename(os.path.normpath(session.project_dir))
+        return paths.encoded_of(session.project_dir)
     return paths.encode_dir(session.cwd) if session.cwd else ""
 
 
@@ -243,14 +226,8 @@ def _claude_rm(sid: str) -> list[Step]:
 
 
 def current_title(session: Session) -> str:
-    """The last `custom-title` record in the transcript, '' when there is none."""
-    last = ""
-    for obj in _records(session.path):
-        if obj.get("type") == "custom-title":
-            title = obj.get("customTitle")
-            if isinstance(title, str):
-                last = title
-    return last
+    """The name a rename starts from: the session's own custom title, or ''."""
+    return session.custom
 
 
 def rename(session: Session, new_name: str) -> str | None:
@@ -274,28 +251,22 @@ def rename(session: Session, new_name: str) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
-def delete(session: Session, snap: Snapshot, dry_run: bool = False) -> DeletePlan:
+def delete(session: Session, snap: Snapshot) -> DeletePlan:
     known, job = _daemon_known(session, snap)
     worktree = job.get("worktreePath")
     return DeletePlan(
         sid=session.sid,
         title=session.custom or session.title,
-        project_dir=session.project_dir,
-        encoded=_encoded_of(session),
         cwd=session.cwd,
         daemon_known=known,
         job_state=str(job.get("state") or ""),
         job_worktree=worktree if isinstance(worktree, str) else "",
         paths=[p for p in _session_paths(session) if os.path.lexists(p)],
-        dry_run=dry_run,
     )
 
 
 def perform_delete(plan: DeletePlan) -> DeleteReport:
     report = DeleteReport(sid=plan.sid)
-    if plan.dry_run:
-        report.removed = list(plan.paths)
-        return report
     if plan.daemon_known:
         report.steps.extend(_claude_rm(plan.sid))
     for path in plan.paths:

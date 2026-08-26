@@ -11,7 +11,7 @@ import curses
 import subprocess
 from collections.abc import Callable, Iterator
 
-from cct.layout import dw
+from cct.layout import cwid, dw
 from cct.theme import PALETTE, Ink, Row, Style
 
 
@@ -53,17 +53,15 @@ class Palette:
         colors: int,
         pairs: int,
         init_pair: Callable[[int, int, int], None],
-        attrs: dict[str, int] | None = None,
     ) -> None:
         self.colors = colors
         self.pairs = pairs
         self._init_pair = init_pair
         self._cache: dict[tuple[int, int], int] = {}
         self._next = 1
-        a = attrs or {}
-        self.a_bold = a.get("bold", curses.A_BOLD)
-        self.a_dim = a.get("dim", curses.A_DIM)
-        self.a_reverse = a.get("reverse", curses.A_REVERSE)
+        self.a_bold = curses.A_BOLD
+        self.a_dim = curses.A_DIM
+        self.a_reverse = curses.A_REVERSE
 
     @property
     def has_color(self) -> bool:
@@ -116,7 +114,7 @@ def cut(text: str, cells: int) -> str:
     out: list[str] = []
     width = 0
     for ch in text:
-        cw = dw(ch)
+        cw = cwid(ch)
         if width + cw > cells:
             break
         out.append(ch)
@@ -256,10 +254,6 @@ class Screen:
     @property
     def size(self) -> tuple[int, int]:
         return self.stdscr.getmaxyx()
-
-    @property
-    def height(self) -> int:
-        return self.stdscr.getmaxyx()[0]
 
     @property
     def width(self) -> int:

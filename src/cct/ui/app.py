@@ -359,7 +359,7 @@ class App:
         session = self.current()
         if session is None:
             return []
-        key = (session.sid, self.state.query, width, id(self.snap))
+        key = (session.sid, self.state.query, width)
         if key != self._preview_key:
             rows = preview.render(session.sid, self.snap, self.state.query)
             self._preview_rows = preview.wrap(rows, width)

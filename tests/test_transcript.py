@@ -182,20 +182,3 @@ def test_unparsable_lines_are_skipped(tmp_path):
 def test_missing_file_raises_oserror(tmp_path):
     with pytest.raises(OSError):
         transcript.parse_session(str(tmp_path / "nope.jsonl"))
-
-
-def test_custom_title_round_trip(tmp_path):
-    path = write(tmp_path, [user("hi")])
-    assert transcript.read_custom_title(path) == ""
-    transcript.append_custom_title(path, SID, "renamed")
-    assert transcript.read_custom_title(path) == "renamed"
-    transcript.append_custom_title(path, SID, "renamed again")
-    assert transcript.read_custom_title(path) == "renamed again"
-    assert transcript.parse_session(path).title == "renamed again"
-
-
-def test_appending_a_title_leaves_the_transcript_parsable(tmp_path):
-    path = write(tmp_path, [user("hi")])
-    transcript.append_custom_title(path, SID, "x")
-    with open(path) as fh:
-        assert all(json.loads(line) for line in fh if line.strip())

@@ -92,3 +92,16 @@ Row = list[Span]
 
 def plain(row: Row) -> str:
     return "".join(text for text, _ in row)
+
+
+def merge(row: Row) -> Row:
+    """Collapse neighbouring spans that share a style, dropping the empty ones."""
+    out: Row = []
+    for text, style in row:
+        if not text:
+            continue
+        if out and out[-1][1] is style:
+            out[-1] = (out[-1][0] + text, style)
+        else:
+            out.append((text, style))
+    return out
