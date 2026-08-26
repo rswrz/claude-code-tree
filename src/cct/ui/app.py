@@ -43,6 +43,7 @@ RESIZE = "resize"
 RELOAD = "reload"
 RESUME = "resume"
 FORK = "fork"
+NEW = "new"
 RENAME = "rename"
 DELETE = "delete"
 PRUNE = "prune"
@@ -148,6 +149,8 @@ def handle_key(state: UIState, key) -> Effect:
         return Effect(RESUME)
     if key == "\x06":
         return Effect(FORK)
+    if key == "\x0e":
+        return Effect(NEW)
     if key == "\x12":
         return Effect(RENAME)
     if key == "\x18":
@@ -213,6 +216,7 @@ def header_row(target: str, all_projects: bool, n_projects: int) -> Row:
 
 HINTS_MAIN = [
     ("Enter", "resume/attach"),
+    ("Ctrl+N", "new session"),
     ("Ctrl+F", "fork"),
     ("Ctrl+R", "rename"),
     ("Ctrl+X", "delete"),
@@ -447,6 +451,12 @@ class App:
         self.screen.run(argv, actions.work_dir(session, self.snap, self.target))
         self.sync(force=True)
 
+    def new_session(self) -> None:
+        """Start a session in the directory the list is pointed at."""
+        cwd = actions.new_dir(self.current(), self.snap, self.target, self.state.all_projects)
+        self.screen.run(actions.new_command(), cwd)
+        self.sync(force=True)
+
     def do_rename(self) -> None:
         session = self.current()
         if session is None:
@@ -542,6 +552,8 @@ class App:
             self.open_session(fork=False)
         elif kind == FORK:
             self.open_session(fork=True)
+        elif kind == NEW:
+            self.new_session()
         elif kind == RENAME:
             self.do_rename()
         elif kind == DELETE:

@@ -322,6 +322,10 @@ def test_fork_command_always_resumes():
     assert actions.fork_command(session) == ["claude", "--resume", "n" * 36, "--fork-session"]
 
 
+def test_new_command_starts_a_fresh_session():
+    assert actions.new_command() == ["claude"]
+
+
 def test_is_live_only_counts_background_agents_with_a_pid():
     sid = "o" * 36
     session = Session(sid=sid)
@@ -339,3 +343,24 @@ def test_work_dir_prefers_the_session_cwd(tmp_path):
     assert actions.work_dir(session, Snapshot(), "/nowhere") == str(real)
     gone = Session(sid="q" * 36, cwd=str(tmp_path / "vanished"))
     assert actions.work_dir(gone, Snapshot(), "/fallback") == "/fallback"
+
+
+def test_new_dir_uses_the_scope_directory_in_project_scope(tmp_path):
+    session = Session(sid="r" * 36, cwd=str(tmp_path))
+    assert actions.new_dir(session, Snapshot(), "/scope", all_projects=False) == "/scope"
+
+
+def test_new_dir_uses_the_selected_session_cwd_in_all_projects_scope(tmp_path):
+    real = tmp_path / "repo"
+    real.mkdir()
+    session = Session(sid="s" * 36, cwd=str(real))
+    assert actions.new_dir(session, Snapshot(), "/scope", all_projects=True) == str(real)
+
+
+def test_new_dir_falls_back_to_scope_without_a_selection():
+    assert actions.new_dir(None, Snapshot(), "/scope", all_projects=True) == "/scope"
+
+
+def test_new_dir_falls_back_to_scope_when_the_session_cwd_is_gone(tmp_path):
+    gone = Session(sid="t" * 36, cwd=str(tmp_path / "vanished"))
+    assert actions.new_dir(gone, Snapshot(), "/scope", all_projects=True) == "/scope"

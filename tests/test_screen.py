@@ -354,6 +354,7 @@ def test_preview_scroll_clamps_to_the_last_page():
     ("\r", app.RESUME),
     (curses.KEY_ENTER, app.RESUME),
     ("\x06", app.FORK),
+    ("\x0e", app.NEW),
     ("\x12", app.RENAME),
     ("\x18", app.DELETE),
     ("\x14", app.PRUNE),
@@ -498,6 +499,7 @@ def test_footer_is_always_two_lines():
     lines = app.footer_lines(200, branch="main", sort=Sort.RECENT)
     assert len(lines) == 2
     assert plain(lines[0]).startswith("Enter resume/attach")
+    assert "Ctrl+N new session" in plain(lines[0])
     assert "Ctrl+B branch=main" in plain(lines[1])
     assert "Ctrl+S sort=recent" in plain(lines[1])
 

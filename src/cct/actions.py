@@ -1,4 +1,4 @@
-"""Session actions: rename, delete, prune stubs, links, resume and fork.
+"""Session actions: rename, delete, prune stubs, links, resume, fork and new.
 
 Curses owns the terminal, so nothing here prints. Every action either returns a
 plan for the UI to confirm, or a report for the UI to show in a modal.
@@ -375,7 +375,7 @@ def open_link(url: str) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
-# resume / fork
+# resume / fork / new
 # --------------------------------------------------------------------------- #
 
 
@@ -395,9 +395,22 @@ def fork_command(session: Session) -> list[str]:
     return [CLAUDE, "--resume", session.sid, "--fork-session"]
 
 
+def new_command() -> list[str]:
+    """A session that does not exist yet: `claude` with nothing to resume."""
+    return [CLAUDE]
+
+
 def work_dir(session: Session, snap: Snapshot, fallback: str = "") -> str:
     """Where a resumed session should start. Its own cwd wins."""
     for candidate in (session.cwd, (snap.project_of(session.sid).cwd if snap.project_of(session.sid) else ""), fallback):
         if candidate and os.path.isdir(candidate):
             return candidate
     return fallback or os.getcwd()
+
+
+def new_dir(session: Session | None, snap: Snapshot, scope_dir: str, all_projects: bool) -> str:
+    """Where a new session starts: the scope directory, or — browsing every
+    project — the directory of the selected session."""
+    if all_projects and session is not None:
+        return work_dir(session, snap, scope_dir)
+    return scope_dir
