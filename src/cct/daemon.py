@@ -82,14 +82,6 @@ def roster_workers() -> dict:
     return workers if isinstance(workers, dict) else {}
 
 
-def is_live(sid: str) -> bool:
-    """True while the daemon holds a worker for this session."""
-    for worker in roster_workers().values():
-        if isinstance(worker, dict) and worker.get("sessionId") == sid:
-            return True
-    return False
-
-
 def roster_fork_parents() -> dict[str, str]:
     """Sessions the daemon forked, mapped to the transcript they were forked from."""
     out: dict[str, str] = {}

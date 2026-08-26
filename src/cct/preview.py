@@ -31,8 +31,10 @@ def render(sid: str, snap: Snapshot, query: str | fuzzy.Query | None = None) -> 
     """The preview for ``sid``, or the job state when there is no transcript."""
     q = fuzzy.parse(query) if isinstance(query, str) else query
     try:
+        agent = snap.agents.get(sid)
         path = _find_path(sid, snap)
-        rows = _render_transcript(sid, path, q) if path else render_job(sid)
+        rows = (_render_transcript(sid, path, q, agent, snap.jobs.get(sid) or {})
+                if path else render_job(sid, agent))
         if not rows:
             rows = [[(f"no transcript and no job state for {sid[:8]}", Style.DIM)]]
         return rows
@@ -40,8 +42,11 @@ def render(sid: str, snap: Snapshot, query: str | fuzzy.Query | None = None) -> 
         return [[(f"preview unavailable: {type(exc).__name__}", Style.DIM)]]
 
 
-def render_job(sid: str) -> list[Row]:
-    """Fallback view for a session the daemon knows but no transcript covers."""
+def render_job(sid: str, agent: Agent | None = None) -> list[Row]:
+    """Fallback view for a session the daemon knows but no transcript covers.
+
+    ``agent`` is the snapshot's, the one the list row draws its badge from.
+    """
     js = daemon.job_state(sid)
     if not js:
         return []
@@ -49,11 +54,11 @@ def render_job(sid: str) -> list[Row]:
         [(str(js.get("name") or sid[:8]), Style.BOLD)],
         [(sid, Style.DIM)],
     ]
-    btext, bstyle = badge(Agent(sid=sid, kind="background",
-                                state=js.get("state") or "", live=daemon.is_live(sid)))
-    out.append([(btext, bstyle or Style.NORMAL)])
+    btext, bstyle = badge(agent)
+    if btext:
+        out.append([(btext, bstyle or Style.NORMAL)])
     out.append([])
-    for k in ("detail", "intent", "cwd", "worktreePath", "createdAt", "updatedAt"):
+    for k in ("state", "detail", "intent", "cwd", "worktreePath", "createdAt", "updatedAt"):
         v = js.get(k)
         if isinstance(v, (str, int, float)) and str(v).strip():
             out.append([(k, Style.DIM), (" " + " ".join(str(v).split())[:MSG_MAX], Style.NORMAL)])
@@ -173,7 +178,8 @@ def _deco(text: str, base: Style, q: fuzzy.Query | None) -> Row:
     return merge(list(zip(text, styles)))
 
 
-def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
+def _render_transcript(sid: str, path: str, q: fuzzy.Query | None,
+                       agent: Agent | None, js: dict) -> list[Row]:
     head, tail, truncated = _load(path)
     recs = head + tail
     mtime = os.path.getmtime(path)
@@ -315,13 +321,8 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
     if not any(o.get("type") in ("user", "assistant") for o in recs):
         out.append([("∅ transcript holds no messages — this session cannot be resumed", Style.DIM)])
 
-    js = daemon.job_state(sid)
-    state = js.get("state") or ""
-    live = daemon.is_live(sid)
-    # the same badge the list draws: a job when the daemon holds job state for
-    # this session, an interactive worker otherwise
-    agent = (Agent(sid=sid, kind="background", state=state, live=live) if js
-             else Agent(sid=sid, live=live))
+    # the snapshot is the single source for both, so the badge and the state row
+    # below it cannot disagree; no agent means no badge, exactly as in the list
     btext, bstyle = badge(agent)
     if btext:
         out.append([(btext, bstyle or Style.NORMAL)])
@@ -360,7 +361,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None) -> list[Row]:
     if skills:
         kv("skills", ", ".join(skills))
     if js:
-        kv("state", state)
+        kv("state", js.get("state"))
         kv("intent", js.get("intent"))
         kv("detail", js.get("detail") or ((js.get("output") or {}).get("result")))
         kv("tokens", js.get("tokens"))

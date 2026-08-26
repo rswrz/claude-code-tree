@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from cct import fuzzy, paths, preview
-from cct.model import Snapshot
+from cct.layout import build_rows
+from cct.model import Agent, Session, Snapshot, TreeRow
 from cct.theme import Row, Style, plain
 
 T0 = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
@@ -42,10 +43,11 @@ def tool_turn(n: int = 0, calls: int = 1) -> dict:
 
 @pytest.fixture
 def worker(fake_home):
-    """Give a session a live daemon worker, the way the roster records one."""
+    """Give sessions a live daemon worker, the way the roster records one."""
 
-    def _make(sid: str) -> None:
-        Path(paths.ROSTER).write_text(json.dumps({"workers": {"w0": {"sessionId": sid}}}))
+    def _make(*sids: str) -> None:
+        Path(paths.ROSTER).write_text(json.dumps(
+            {"workers": {f"w{i}": {"sessionId": sid} for i, sid in enumerate(sids)}}))
 
     return _make
 
@@ -70,6 +72,30 @@ def kv(rows: list[Row], key: str) -> str | None:
         if line.startswith(key.ljust(10)) and len(line) > 10:
             return line[10:]
     return None
+
+
+def badge_span(row: Row) -> tuple[str, Style | None]:
+    """The badge span of one rendered row, or ``('', None)`` when it carries none."""
+    for text, style in row:
+        token = text.strip()
+        if token.startswith(("bg:", "live:")):
+            return token, style
+    return "", None
+
+
+def row_badge(snap: Snapshot, sid: str, width: int = 120) -> tuple[str, Style | None]:
+    """The badge the session list draws for ``sid``."""
+    tree = [TreeRow(sid=sid, prefix="", connector="", depth=0)]
+    return badge_span(build_rows(snap, tree, width, False)[0])
+
+
+def pane_badge(rows: list[Row]) -> tuple[str, Style | None]:
+    """The badge the preview pane draws."""
+    for row in rows:
+        found = badge_span(row)
+        if found[0]:
+            return found
+    return "", None
 
 
 class TestHeader:
@@ -107,37 +133,113 @@ class TestHeader:
         lines = text_of(preview.render(sid, Snapshot()))
         assert "∅ transcript holds no messages — this session cannot be resumed" in lines
 
-    def test_the_job_badge_follows_the_stats(self, transcript, make_job_state):
+    def test_the_job_badge_follows_the_stats(self, transcript):
         sid = transcript([user("hi")])
-        make_job_state(sid, state="blocked")
-        rows = preview.render(sid, Snapshot())
+        snap = Snapshot(agents={sid: Agent(sid=sid, kind="background", state="blocked")})
+        rows = preview.render(sid, snap)
         assert text_of(rows)[2] == "bg:blocked"
         assert rows[2][0][1] is Style.STATE_WARN
 
-    def test_the_badge_reads_as_the_list_reads_it(self, transcript, make_job_state, worker):
-        """The pane and the row beside it spell one badge, colour included."""
+    def test_the_status_comes_from_the_snapshot(self, transcript):
+        """Only the agents view knows a status, and the pane spells it."""
+        sid = transcript([user("hi")])
+        snap = Snapshot(agents={sid: Agent(sid=sid, status="working", live=True)})
+        rows = preview.render(sid, snap)
+        assert text_of(rows)[2] == "live:working"
+        assert rows[2][0][1] is Style.STATE_OK
+
+    def test_the_daemon_files_alone_earn_no_badge(self, transcript, make_job_state, worker):
+        """No agent in the snapshot, no badge — the same nothing the row shows."""
         sid = transcript([user("hi")])
         make_job_state(sid, state="working")
-        rows = preview.render(sid, Snapshot())
-        assert text_of(rows)[2] == "bg:working"
-        assert rows[2][0][1] is Style.STATE_BAD          # no worker behind the state
-
         worker(sid)
-        rows = preview.render(sid, Snapshot())
-        assert text_of(rows)[2] == "bg:working"
-        assert rows[2][0][1] is Style.STATE_OK
+        snap = Snapshot(jobs={sid: {"state": "working"}})
+        assert pane_badge(preview.render(sid, snap)) == ("", None)
+        assert row_badge(snap, sid) == ("", None)
 
-    def test_a_session_the_daemon_holds_a_worker_for_is_live(self, transcript, worker):
+    def test_the_state_row_cannot_contradict_the_badge(self, transcript, make_job_state):
+        """Badge and state row both come from the snapshot, so they speak as one."""
         sid = transcript([user("hi")])
-        worker(sid)
-        rows = preview.render(sid, Snapshot())
-        assert text_of(rows)[2] == "live:"
-        assert rows[2][0][1] is Style.STATE_OK
+        make_job_state(sid, state="working")           # the disk is behind the snapshot
+        snap = Snapshot(
+            agents={sid: Agent(sid=sid, kind="background", state="done")},
+            jobs={sid: {"state": "done"}},
+        )
+        rows = preview.render(sid, snap)
+        assert pane_badge(rows) == ("bg:done", Style.STATE_DONE)
+        assert kv(rows, "state") == "done"
 
     def test_a_session_the_daemon_knows_nothing_about_wears_no_badge(self, transcript):
         sid = transcript([user("hi")])
         lines = text_of(preview.render(sid, Snapshot()))
         assert lines[2].startswith("session ")
+
+
+class TestBadgeAgreement:
+    """The pane and the row beside it spell one badge, colour included."""
+
+    LIVE_STATUS = "11111111-1111-1111-1111-111111111111"
+    LIVE_BARE = "22222222-2222-2222-2222-222222222222"
+    BG_STATE = "33333333-3333-3333-3333-333333333333"
+    BG_STALLED = "44444444-4444-4444-4444-444444444444"
+    UNKNOWN = "55555555-5555-5555-5555-555555555555"
+    LIVE_NO_WORKER = "66666666-6666-6666-6666-666666666666"
+
+    @pytest.fixture
+    def world(self, transcript, make_job_state, worker):
+        """Every badge shape at once: one snapshot, and the disk behind it."""
+        sids = [self.LIVE_STATUS, self.LIVE_BARE, self.BG_STATE,
+                self.BG_STALLED, self.UNKNOWN, self.LIVE_NO_WORKER]
+        for sid in sids:
+            transcript([user("hi")], sid)
+        make_job_state(self.BG_STATE, state="done")
+        make_job_state(self.BG_STALLED, state="working")
+        worker(self.LIVE_STATUS, self.LIVE_BARE, self.BG_STATE)
+        return Snapshot(
+            sessions={sid: Session(sid=sid, mtime=1_000_000.0, users=1) for sid in sids},
+            agents={
+                self.LIVE_STATUS: Agent(sid=self.LIVE_STATUS, status="working", live=True),
+                self.LIVE_BARE: Agent(sid=self.LIVE_BARE, live=True),
+                self.BG_STATE: Agent(sid=self.BG_STATE, kind="background",
+                                     state="done", live=True),
+                self.BG_STALLED: Agent(sid=self.BG_STALLED, kind="background",
+                                       state="working"),
+                self.LIVE_NO_WORKER: Agent(sid=self.LIVE_NO_WORKER, status="waiting",
+                                           live=True),
+            },
+            jobs={self.BG_STATE: {"state": "done"},
+                  self.BG_STALLED: {"state": "working"}},
+        )
+
+    # LIVE_STATUS and LIVE_NO_WORKER are the shapes only the snapshot can spell:
+    # a status, and a session no daemon file mentions. The rest guard agreement.
+    @pytest.mark.parametrize("sid,expected", [
+        ("LIVE_STATUS", ("live:working", Style.STATE_OK)),
+        ("LIVE_NO_WORKER", ("live:waiting", Style.STATE_WARN)),
+        ("LIVE_BARE", ("live:", Style.STATE_OK)),
+        ("BG_STATE", ("bg:done", Style.STATE_DONE)),
+        ("BG_STALLED", ("bg:working", Style.STATE_BAD)),
+        ("UNKNOWN", ("", None)),
+    ])
+    def test_one_snapshot_one_badge(self, world, sid, expected):
+        sid = getattr(self, sid)
+        assert row_badge(world, sid) == expected
+        assert pane_badge(preview.render(sid, world)) == expected
+
+    def test_a_job_without_a_transcript_agrees_too(self, fake_home, make_job_state):
+        """The job view draws the snapshot's agent as well, liveness included."""
+        make_job_state(SID, state="working", name="nightly")
+        snap = Snapshot(agents={SID: Agent(sid=SID, kind="background",
+                                           state="working", live=True)})
+        assert pane_badge(preview.render(SID, snap)) == row_badge(snap, SID)
+        assert pane_badge(preview.render(SID, snap)) == ("bg:working", Style.STATE_OK)
+
+    def test_a_job_without_an_agent_keeps_its_state_row(self, fake_home, make_job_state):
+        """No badge left to carry the state, so the job view spells it out."""
+        make_job_state(SID, state="working", name="nightly")
+        rows = preview.render(SID, Snapshot())
+        assert pane_badge(rows) == ("", None)
+        assert "state working" in text_of(rows)
 
 
 class TestKeyValues:
@@ -222,11 +324,12 @@ class TestKeyValues:
         ])
         assert kv(preview.render(sid, Snapshot()), "skills") == "design, dataviz"
 
-    def test_job_fields_come_last(self, transcript, make_job_state):
+    def test_job_fields_come_last(self, transcript):
         sid = transcript([user("hi")])
-        make_job_state(sid, state="done", intent="ship it", detail="all green",
-                       tokens=1234, createdAt="t0", updatedAt="t1")
-        rows = preview.render(sid, Snapshot())
+        snap = Snapshot(jobs={sid: {"state": "done", "intent": "ship it",
+                                    "detail": "all green", "tokens": 1234,
+                                    "createdAt": "t0", "updatedAt": "t1"}})
+        rows = preview.render(sid, snap)
         assert kv(rows, "intent") == "ship it"
         assert kv(rows, "detail") == "all green"
         assert kv(rows, "tokens") == "1234"
@@ -339,10 +442,13 @@ class TestJobFallback:
     def test_a_session_without_a_transcript_shows_its_job(self, fake_home, make_job_state):
         make_job_state(SID, state="working", name="nightly", intent="build",
                        cwd="/repo", createdAt="t0")
-        lines = text_of(preview.render(SID, Snapshot()))
+        snap = Snapshot(agents={SID: Agent(sid=SID, kind="background", state="working",
+                                           live=True)})
+        lines = text_of(preview.render(SID, snap))
         assert lines[0] == "nightly"
         assert lines[1] == SID
         assert lines[2] == "bg:working"
+        assert "state working" in lines
         assert "intent build" in lines
         assert "cwd /repo" in lines
 
