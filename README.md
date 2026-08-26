@@ -8,6 +8,8 @@ resume, attach, fork, rename, delete or prune.
 
 Python 3.11+, standard library only, no external binaries.
 
+![claude-code-tree browsing a project's sessions](docs/screenshot.png)
+
 ## Install
 
 ```
