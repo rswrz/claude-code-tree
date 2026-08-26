@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import curses
+import re
 
-from cct.layout import dw
+from cct.layout import cwid, dw
 from cct.theme import Row, Style, plain
 
 from .screen import Screen, cut
 
 MIN_INNER = 24
 PAD = 2  # one border column plus one space, on each side
+
+AREA_COLS = 72  # preferred inner width of a text field
+AREA_ROWS = 10  # text lines a field shows before it scrolls
 
 ALL = -1  # picker: the user asked for every item
 
@@ -59,6 +63,43 @@ def edit_line(text: str, key) -> tuple[str, bool]:
     return text, False
 
 
+def wrap_text(text: str, width: int) -> list[str]:
+    """Break text into display lines of at most ``width`` cells."""
+    width = max(width, 1)
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        lines.extend(_wrap(paragraph, width))
+    return lines
+
+
+def _wrap(paragraph: str, width: int) -> list[str]:
+    lines: list[str] = []
+    line = ""
+    held = ""  # spaces kept back until the word they belong to lands
+    for token in re.findall(r"[^ ]+| +", paragraph):
+        if token[0] == " ":
+            held += token
+            continue
+        if line and dw(line) + dw(held) + dw(token) > width:
+            lines.append(line)
+            line = ""
+        else:
+            line += held
+        held = ""
+        for ch in token:
+            if dw(line) + cwid(ch) > width:
+                lines.append(line)
+                line = ""
+            line += ch
+    for ch in held:
+        if dw(line) + 1 > width:
+            lines.append(line)
+            line = ""
+        line += ch
+    lines.append(line)
+    return lines
+
+
 # --------------------------------------------------------------------------- #
 # drawing
 # --------------------------------------------------------------------------- #
@@ -96,6 +137,12 @@ def _show(scr: Screen, title: str, lines: list[str | Row], extra: list[str | Row
     return geometry, body
 
 
+def _field_width(scr: Screen, title: str) -> int:
+    """Inner width of a text field: taken from the screen, never from the text."""
+    height, width = scr.size
+    return box_geometry(height, width, AREA_COLS, 1, dw(title) + 2)[3] - 2 * PAD
+
+
 def _key(scr: Screen):
     while True:
         key = scr.get_key(-1)
@@ -119,12 +166,31 @@ def confirm(scr: Screen, title: str, lines: list[str | Row]) -> bool:
     return isinstance(key, str) and key in ("y", "Y")
 
 
-def text_input(scr: Screen, title: str, prompt: str, initial: str = "") -> str | None:
+def text_area(
+    scr: Screen,
+    title: str,
+    prompt: str,
+    initial: str = "",
+    multiline: bool = False,
+    rows: int = 0,
+) -> str | None:
+    """Edit wrapped text below ``prompt``. Append-only, the caret trails the text.
+
+    ``rows`` fixes the field to that many text lines; 0 grows it to
+    :data:`AREA_ROWS` and then scrolls.
+    """
+    hint = ("Ctrl+J newline, Enter sends, Esc cancels" if multiline
+            else "Enter to confirm, Esc to cancel")
     text = initial
     while True:
-        field: Row = [(prompt, Style.DIM), (text, Style.NORMAL)]
-        (top, left, box_h, box_w), body = _show(scr, title, [field, [("Enter to confirm, Esc to cancel", Style.DIM)]])
-        scr.place_cursor(top + 1, left + PAD + dw(prompt) + dw(text))
+        inner_w = _field_width(scr, title)
+        view = wrap_text(text, inner_w)[-(rows or AREA_ROWS):]
+        caret = len(view) - 1
+        label = prompt + " " * max(0, inner_w - dw(prompt))
+        body: list[str | Row] = [[(label, Style.DIM)]]
+        body.extend([(line, Style.NORMAL)] for line in view + [""] * (rows - len(view)))
+        (top, left, _box_h, _box_w), _body = _show(scr, title, body, [[(hint, Style.DIM)]])
+        scr.place_cursor(top + 2 + caret, left + PAD + dw(view[caret]))
         scr.refresh()
         key = _key(scr)
         if key in ESCAPE:
@@ -133,7 +199,15 @@ def text_input(scr: Screen, title: str, prompt: str, initial: str = "") -> str |
         if key in ENTER:
             scr.hide_cursor()
             return text
+        if key == "\n":
+            if multiline:
+                text += "\n"
+            continue
         text, _handled = edit_line(text, key)
+
+
+def text_input(scr: Screen, title: str, prompt: str, initial: str = "") -> str | None:
+    return text_area(scr, title, prompt, initial)
 
 
 def picker(scr: Screen, title: str, items: list[str]) -> int | None:

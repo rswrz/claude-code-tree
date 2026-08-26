@@ -326,6 +326,28 @@ def test_new_command_starts_a_fresh_session():
     assert actions.new_command() == ["claude"]
 
 
+def test_new_command_names_the_session():
+    assert actions.new_command("my session") == ["claude", "--name", "my session"]
+
+
+def test_new_command_strips_a_blank_name():
+    assert actions.new_command("   ") == ["claude"]
+
+
+def test_dispatch_forwards_the_prompt_and_cwd(monkeypatch):
+    calls = []
+
+    def fake_run(args, label="", cwd=None):
+        calls.append((args, cwd))
+        return actions.Step("claude --bg", True, 0, "queued")
+
+    monkeypatch.setattr(actions, "_run", fake_run)
+    step = actions.dispatch("do the thing", "/some/dir")
+
+    assert calls == [(["--bg", "do the thing"], "/some/dir")]
+    assert step == actions.Step("claude --bg", True, 0, "queued")
+
+
 def test_is_live_only_counts_background_agents_with_a_pid():
     sid = "o" * 36
     session = Session(sid=sid)

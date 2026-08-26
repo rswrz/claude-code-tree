@@ -1,4 +1,4 @@
-"""Session actions: rename, delete, prune stubs, links, resume, fork and new.
+"""Session actions: rename, delete, prune stubs, links, resume, fork, new and dispatch.
 
 Curses owns the terminal, so nothing here prints. Every action either returns a
 plan for the UI to confirm, or a report for the UI to show in a modal.
@@ -375,7 +375,7 @@ def open_link(url: str) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
-# resume / fork / new
+# resume / fork / new / dispatch
 # --------------------------------------------------------------------------- #
 
 
@@ -395,9 +395,16 @@ def fork_command(session: Session) -> list[str]:
     return [CLAUDE, "--resume", session.sid, "--fork-session"]
 
 
-def new_command() -> list[str]:
-    """A session that does not exist yet: `claude` with nothing to resume."""
-    return [CLAUDE]
+def new_command(name: str = "") -> list[str]:
+    """A session that does not exist yet, named up front when asked for."""
+    name = name.strip()
+    return [CLAUDE, "--name", name] if name else [CLAUDE]
+
+
+def dispatch(prompt: str, cwd: str = "") -> Step:
+    """Queue a background agent. `--bg` returns as soon as the job exists, so
+    the terminal is never handed over."""
+    return _run(["--bg", prompt], "claude --bg", cwd=cwd)
 
 
 def work_dir(session: Session, snap: Snapshot, fallback: str = "") -> str:

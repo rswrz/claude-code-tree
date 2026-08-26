@@ -44,6 +44,7 @@ RELOAD = "reload"
 RESUME = "resume"
 FORK = "fork"
 NEW = "new"
+DISPATCH = "dispatch"
 RENAME = "rename"
 DELETE = "delete"
 PRUNE = "prune"
@@ -151,6 +152,8 @@ def handle_key(state: UIState, key) -> Effect:
         return Effect(FORK)
     if key == "\x0e":
         return Effect(NEW)
+    if key == "\x04":
+        return Effect(DISPATCH)
     if key == "\x12":
         return Effect(RENAME)
     if key == "\x18":
@@ -217,6 +220,7 @@ def header_row(target: str, all_projects: bool, n_projects: int) -> Row:
 HINTS_MAIN = [
     ("Enter", "resume/attach"),
     ("Ctrl+N", "new session"),
+    ("Ctrl+D", "background agent"),
     ("Ctrl+F", "fork"),
     ("Ctrl+R", "rename"),
     ("Ctrl+X", "delete"),
@@ -452,9 +456,25 @@ class App:
         self.sync(force=True)
 
     def new_session(self) -> None:
-        """Start a session in the directory the list is pointed at."""
+        """Start a session, named if asked for, then come back to the list."""
+        name = widgets.text_input(self.screen, "New session", "name (optional): ")
+        if name is None:
+            return
         cwd = actions.new_dir(self.current(), self.snap, self.target, self.state.all_projects)
-        self.screen.run(actions.new_command(), cwd)
+        self.screen.run(actions.new_command(name), cwd)
+        self.sync(force=True)
+
+    def dispatch_agent(self) -> None:
+        """Queue a background agent. It runs without the terminal, so the list stays up."""
+        prompt = widgets.text_area(
+            self.screen, "Background agent", "prompt: ", multiline=True, rows=widgets.AREA_ROWS
+        )
+        if not prompt or not prompt.strip():
+            return
+        cwd = actions.new_dir(self.current(), self.snap, self.target, self.state.all_projects)
+        step = actions.dispatch(prompt.strip(), cwd)
+        if not step.ok:
+            widgets.message(self.screen, "Dispatch failed", step.lines())
         self.sync(force=True)
 
     def do_rename(self) -> None:
@@ -554,6 +574,8 @@ class App:
             self.open_session(fork=True)
         elif kind == NEW:
             self.new_session()
+        elif kind == DISPATCH:
+            self.dispatch_agent()
         elif kind == RENAME:
             self.do_rename()
         elif kind == DELETE:

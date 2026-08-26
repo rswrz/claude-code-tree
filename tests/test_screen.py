@@ -308,6 +308,85 @@ def test_edit_line_handles_typing_and_erasing():
     assert widgets.edit_line("ab", "\x06") == ("ab", False)
 
 
+def test_wrap_text_wraps_greedily_at_spaces():
+    assert widgets.wrap_text("the quick brown fox", 10) == ["the quick", "brown fox"]
+
+
+def test_wrap_text_of_nothing_is_one_empty_line():
+    assert widgets.wrap_text("", 10) == [""]
+
+
+def test_wrap_text_keeps_the_line_a_trailing_newline_opens():
+    assert widgets.wrap_text("hi\n", 10) == ["hi", ""]
+
+
+def test_wrap_text_splits_on_explicit_newlines():
+    assert widgets.wrap_text("one\ntwo", 10) == ["one", "two"]
+    assert widgets.wrap_text("a\n\nb", 10) == ["a", "", "b"]
+
+
+def test_wrap_text_hard_splits_an_overlong_word():
+    assert widgets.wrap_text("abcdefgh", 3) == ["abc", "def", "gh"]
+
+
+def test_wrap_text_counts_wide_characters_as_two_cells():
+    assert dw("あいうえお") == 10
+    lines = widgets.wrap_text("あいうえお", 6)
+    assert lines == ["あいう", "えお"]
+    assert all(dw(line) <= 6 for line in lines)
+
+
+def test_wrap_text_survives_a_zero_width():
+    assert widgets.wrap_text("ab", 0) == ["a", "b"]
+
+
+class AreaScreen:
+    """A Screen that draws nowhere and hands out a scripted key stream."""
+
+    def __init__(self, keys):
+        self.keys = list(keys)
+        self.stdscr = FakeWin([])
+        self.size = (40, 120)
+
+    def __getattr__(self, name):
+        def call(*args, **kwargs):
+            return None
+
+        return call
+
+    def get_key(self, timeout_ms=-1):
+        return self.keys.pop(0)
+
+
+def area(keys, **kw):
+    return widgets.text_area(AreaScreen(keys), "Title", "> ", **kw)
+
+
+def test_text_area_returns_what_was_typed():
+    assert area(["h", "i", "\r"]) == "hi"
+
+
+def test_text_area_cancels_on_escape_and_on_ctrl_c():
+    assert area(["h", "\x1b"]) is None
+    assert area(["h", "\x03"]) is None
+
+
+def test_text_area_inserts_a_newline_when_multiline():
+    assert area(["a", "\n", "b", "\r"], multiline=True) == "a\nb"
+
+
+def test_text_area_ignores_ctrl_j_on_a_single_line():
+    assert area(["a", "\n", "b", "\r"]) == "ab"
+
+
+def test_text_area_starts_from_the_initial_text():
+    assert area(["\r"], initial="keep me") == "keep me"
+
+
+def test_text_area_backspace_removes_a_newline():
+    assert area(["a", "\n", "\x7f", "b", "\r"], multiline=True) == "ab"
+
+
 # --------------------------------------------------------------------------- #
 # state
 # --------------------------------------------------------------------------- #
@@ -355,6 +434,7 @@ def test_preview_scroll_clamps_to_the_last_page():
     (curses.KEY_ENTER, app.RESUME),
     ("\x06", app.FORK),
     ("\x0e", app.NEW),
+    ("\x04", app.DISPATCH),
     ("\x12", app.RENAME),
     ("\x18", app.DELETE),
     ("\x14", app.PRUNE),
@@ -500,6 +580,7 @@ def test_footer_is_always_two_lines():
     assert len(lines) == 2
     assert plain(lines[0]).startswith("Enter resume/attach")
     assert "Ctrl+N new session" in plain(lines[0])
+    assert "Ctrl+D background agent" in plain(lines[0])
     assert "Ctrl+B branch=main" in plain(lines[1])
     assert "Ctrl+S sort=recent" in plain(lines[1])
 

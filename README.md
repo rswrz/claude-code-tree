@@ -41,7 +41,8 @@ claude-code-tree --version
 | Key | Action |
 |---|---|
 | Enter | resume session (or attach, if live) |
-| Ctrl+N | start a new session |
+| Ctrl+N | start a new session, optionally named |
+| Ctrl+D | dispatch a background agent |
 | Ctrl+F | fork session |
 | Ctrl+R | rename session |
 | Ctrl+X | delete session |
