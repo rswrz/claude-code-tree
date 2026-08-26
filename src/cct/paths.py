@@ -8,6 +8,7 @@ reach the importer.
 
 from __future__ import annotations
 
+import glob
 import os
 
 HOME: str = ""
@@ -46,10 +47,26 @@ def project_dir_for(abs_dir: str) -> str:
     return os.path.join(PROJECTS_DIR, encode_dir(abs_dir))
 
 
+def encoded_of(project_dir: str) -> str:
+    """The ``<encoded>`` name of a project directory, however it was spelled."""
+    return os.path.basename(os.path.normpath(project_dir))
+
+
 def decode_project_dir(project_dir: str) -> str:
     """Best-effort inverse of :func:`encode_dir`; only the leading ``/`` is certain."""
-    enc = os.path.basename(os.path.normpath(project_dir))
+    enc = encoded_of(project_dir)
     return "/" + enc.lstrip("-").replace("-", "/") if enc else ""
+
+
+def find_transcript(sid: str) -> str:
+    """The newest transcript for this session in any project directory."""
+    matches = glob.glob(os.path.join(PROJECTS_DIR, "*", sid + ".jsonl"))
+    if not matches:
+        return ""
+    try:
+        return max(matches, key=os.path.getmtime)
+    except OSError:   # a file may vanish between the glob and the stat
+        return matches[0]
 
 
 def session_paths(sid: str, project_dir: str, encoded: str) -> list[str]:

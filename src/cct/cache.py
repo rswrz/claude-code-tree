@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 
-from . import paths
+from . import daemon, paths
 from .model import Session
 from .transcript import parse_ts
 
@@ -81,12 +81,7 @@ class Cache:
             self._old = self._read()
 
     def _read(self) -> dict:
-        try:
-            with open(self.path, errors="replace") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
+        return daemon.read_json(self.path)
 
     @property
     def hits(self) -> int:
@@ -124,8 +119,13 @@ class Cache:
             pass
 
     def save(self) -> None:
-        """Replace the file with exactly the sessions seen this scan."""
-        if not self.enabled:
+        """Replace the file with exactly the sessions seen this scan.
+
+        A hit re-files the entry object it read, so an all-hits scan compares
+        equal by identity and writes nothing. A session that vanished drops its
+        key, which makes the dicts differ and the file shrink.
+        """
+        if not self.enabled or self._new == self._old:
             return
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)

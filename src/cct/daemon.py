@@ -36,10 +36,8 @@ def _epoch_seconds(value: object) -> float:
     return stamp / 1000.0 if stamp > 1e11 else stamp
 
 
-def list_agents(cwd: str | None = None, all_: bool = True) -> list[Agent]:
-    cmd = ["claude", "agents", "--json"]
-    if all_:
-        cmd.append("--all")
+def list_agents(cwd: str | None = None) -> list[Agent]:
+    cmd = ["claude", "agents", "--json", "--all"]
     if cwd:
         cmd += ["--cwd", cwd]
     try:
@@ -79,14 +77,6 @@ def roster_workers() -> dict:
     return workers if isinstance(workers, dict) else {}
 
 
-def live_sids() -> set[str]:
-    out = set()
-    for worker in roster_workers().values():
-        if isinstance(worker, dict) and isinstance(worker.get("sessionId"), str):
-            out.add(worker["sessionId"])
-    return out
-
-
 def is_live(sid: str) -> bool:
     """True while the daemon holds a worker for this session."""
     for worker in roster_workers().values():
@@ -114,12 +104,47 @@ def roster_fork_parents() -> dict[str, str]:
     return out
 
 
+def _mtime_ns(path: str) -> int:
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _job_names() -> list[str]:
+    try:
+        return os.listdir(paths.JOBS_DIR)
+    except OSError:
+        return []
+
+
 def job_ids() -> set[str]:
     """The eight-character job directory names, so a scan can skip absent jobs."""
-    try:
-        return {name for name in os.listdir(paths.JOBS_DIR)}
-    except OSError:
-        return set()
+    return set(_job_names())
+
+
+def state_fingerprint() -> tuple[int, int, int]:
+    """The disk behind the agents view: the roster, the jobs directory, the newest state.
+
+    Session id, cwd, name, start time and state all come from
+    ``JOBS_DIR/<job>/state.json``; a worker appearing or leaving rewrites the
+    roster. Liveness and the status line are the daemon's own, so a badge can lag
+    behind those until one of these three locations moves — the soft failure this
+    module trades for not spawning the agents view on every poll.
+
+    ``JOBS_DIR``'s own mtime does not move when a job rewrites its ``state.json``,
+    so the newest state file has to be found by statting them: ~0.1 ms for a few
+    dozen jobs, against ~190 ms for the node process the agents view costs.
+    """
+    newest = 0
+    for name in _job_names():
+        try:
+            newest = max(newest, os.stat(
+                os.path.join(paths.JOBS_DIR, name, "state.json")).st_mtime_ns)
+        except OSError:
+            continue
+    # the directory's own mtime is what a job appearing or being removed moves
+    return _mtime_ns(paths.ROSTER), _mtime_ns(paths.JOBS_DIR), newest
 
 
 def job_state(sid: str) -> dict:

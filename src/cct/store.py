@@ -6,7 +6,6 @@ The UI never touches the disk: it reads :meth:`Loader.snapshot`, polls
 
 from __future__ import annotations
 
-import glob
 import os
 import threading
 import time
@@ -16,9 +15,13 @@ from . import cache as cache_mod
 from . import daemon, gitinfo, paths, transcript, tree
 from .model import Agent, Project, Session, Snapshot, Sort
 
-# Below this many transcripts a change poll can afford to stat the files themselves,
-# which is the only way to notice a session that is being appended to right now.
-FILE_STAT_LIMIT = 400
+# Statting every transcript in scope is the only way a change poll can notice a
+# session that is being appended to right now. It costs ~3 ms for the thousand-odd
+# transcripts across every project directory of a working machine, well under 1 %
+# of a core at a two-per-second poll, so it is not rationed. The limit only bounds
+# the pathological directory: past it the fingerprint reports the transcript count
+# alone, which still notices a create or a delete but no longer an append.
+FILE_STAT_LIMIT = 5000
 
 PUBLISH_INTERVAL = 0.25
 
@@ -44,14 +47,11 @@ class Scope:
 
     @property
     def project_dir(self) -> str:
-        return os.path.join(paths.PROJECTS_DIR, self.encoded) if self.cwd else ""
+        return paths.project_dir_for(self.cwd) if self.cwd else ""
 
     @property
     def label(self) -> str:
         return "all projects" if self.all_projects else self.cwd
-
-    def toggled(self) -> "Scope":
-        return Scope(cwd=self.cwd, all_projects=not self.all_projects)
 
     def project_dirs(self) -> list[str]:
         if not self.all_projects:
@@ -81,15 +81,28 @@ def _transcripts(project_dir: str) -> list[tuple[str, str, os.stat_result]]:
     return out
 
 
-def _find_elsewhere(sid: str) -> str:
-    """The newest transcript for this session in any project directory."""
-    matches = glob.glob(os.path.join(paths.PROJECTS_DIR, "*", sid + ".jsonl"))
-    if not matches:
-        return ""
+def _dir_fingerprint(project_dir: str) -> tuple[int, int]:
+    """``(count, newest mtime)`` over one directory's transcripts.
+
+    The count is always the real one; ``newest`` is ``0`` past
+    :data:`FILE_STAT_LIMIT`, where only creates and deletes are still noticed.
+    """
+    newest = count = 0
     try:
-        return max(matches, key=os.path.getmtime)
+        with os.scandir(project_dir) as it:
+            for entry in it:
+                if not entry.name.endswith(".jsonl"):
+                    continue
+                count += 1
+                if count > FILE_STAT_LIMIT:
+                    continue
+                try:
+                    newest = max(newest, entry.stat().st_mtime_ns)
+                except OSError:
+                    pass
     except OSError:
-        return matches[0]
+        return 0, 0
+    return (count, newest) if count <= FILE_STAT_LIMIT else (count, 0)
 
 
 def _stat_ns(path: str) -> int:
@@ -114,16 +127,10 @@ class Loader:
         self._thread: threading.Thread | None = None
         self._generation = 0
         self._fingerprint: tuple = ()
+        self._agents: list[Agent] = []
+        self._agents_key: tuple = ()
 
     # -- public API ------------------------------------------------------
-
-    @property
-    def scope(self) -> Scope:
-        return self._scope
-
-    @property
-    def sort(self) -> Sort:
-        return self._sort
 
     def start(self) -> None:
         if self._thread is not None:
@@ -180,28 +187,9 @@ class Loader:
     def _compute_fingerprint(self) -> tuple:
         dirs = self._scope.project_dirs()
         parts: list = [_stat_ns(d) for d in dirs]
-        parts.append(_stat_ns(paths.ROSTER))
-        parts.append(_stat_ns(paths.JOBS_DIR))
-        if not self._scope.all_projects and len(dirs) == 1:
-            # a single project is small enough that appends are worth noticing
-            newest = count = 0
-            try:
-                with os.scandir(dirs[0]) as it:
-                    for entry in it:
-                        if not entry.name.endswith(".jsonl"):
-                            continue
-                        count += 1
-                        if count > FILE_STAT_LIMIT:
-                            break
-                        try:
-                            newest = max(newest, entry.stat().st_mtime_ns)
-                        except OSError:
-                            pass
-            except OSError:
-                pass
-            if count <= FILE_STAT_LIMIT:
-                parts.append(newest)
-            parts.append(count)
+        parts.extend(daemon.state_fingerprint())
+        for project_dir in dirs:
+            parts.extend(_dir_fingerprint(project_dir))
         return tuple(parts)
 
     # -- scanning --------------------------------------------------------
@@ -234,7 +222,11 @@ class Loader:
 
     def _scan(self, generation: int) -> None:
         scope = self._scope
-        fingerprint = self._compute_fingerprint()
+        # Claimed before any work is done: a poll firing mid-scan would otherwise
+        # see the same change again, ask for a reload, and abort the scan it is
+        # waiting for. A change that lands after this line still differs from the
+        # claimed value, so dirty() reports it once this scan is done.
+        self._fingerprint = self._compute_fingerprint()
 
         prefetch: dict = {}
         worker = threading.Thread(
@@ -256,11 +248,12 @@ class Loader:
 
         caches: dict[str, cache_mod.Cache] = {}
         sessions: dict[str, Session] = {}
-        last_publish = 0.0
+        last_publish = time.monotonic()
         for index, (project_dir, sid, path, st) in enumerate(entries, 1):
             if self._stale(generation):
+                _save_caches(caches, skip=paths.encoded_of(project_dir))
                 return
-            encoded = os.path.basename(os.path.normpath(project_dir))
+            encoded = paths.encoded_of(project_dir)
             cache = caches.get(encoded)
             if cache is None:
                 cache = caches[encoded] = cache_mod.Cache(encoded, self._use_cache)
@@ -278,8 +271,14 @@ class Loader:
                 self._publish(sessions, {}, jobs, roster_parents, "",
                               scanning=True, scanned=index, total=total)
 
-        for cache in caches.values():
-            cache.save()
+        _save_caches(caches)
+
+        # The whole transcript side is known now, and the agents view behind
+        # worker.join costs two orders of magnitude more than everything above it.
+        # Publish what is finished; badges, ghost rows and the default branch land
+        # in the final publish a moment later.
+        self._publish(sessions, {}, jobs, roster_parents, "",
+                      scanning=True, scanned=total, total=total)
 
         worker.join(timeout=daemon.AGENTS_TIMEOUT + gitinfo.TIMEOUT + 1.0)
         if self._stale(generation):
@@ -289,12 +288,22 @@ class Loader:
 
         self._add_ghosts(sessions, agents, scope, jobs, known_jobs)
 
-        self._fingerprint = fingerprint
         self._publish(sessions, {a.sid: a for a in agents}, jobs, roster_parents,
                       default_branch, scanning=False, scanned=total, total=total)
 
     def _prefetch(self, scope: Scope, out: dict) -> None:
-        out["agents"] = daemon.list_agents(None if scope.all_projects else scope.cwd or None)
+        """Runs beside the parse loop; the agents view is the expensive half."""
+        cwd = None if scope.all_projects else scope.cwd or None
+        key = (cwd,) + daemon.state_fingerprint()
+        if key == self._agents_key and self._agents:
+            # neither the roster nor any job state moved, so the 317 MB node
+            # process behind the agents view would repeat its last answer
+            out["agents"] = self._agents
+        else:
+            agents = daemon.list_agents(cwd)
+            out["agents"] = agents
+            if agents:   # an empty answer may be a daemon that was simply down
+                self._agents, self._agents_key = agents, key
         if scope.cwd and not scope.all_projects:
             out["default_branch"] = gitinfo.default_branch(scope.cwd)
 
@@ -310,7 +319,7 @@ class Loader:
         pending = [a for a in agents if a.kind == "background" and a.sid not in sessions]
         for agent in pending:
             session = None
-            path = _find_elsewhere(agent.sid)
+            path = paths.find_transcript(agent.sid)
             if path:
                 try:
                     session = transcript.parse_session(path, agent.sid)
@@ -318,7 +327,7 @@ class Loader:
                     session = None
             if session is not None:
                 if not session.worktree:
-                    encoded = os.path.basename(os.path.dirname(path))
+                    encoded = paths.encoded_of(os.path.dirname(path))
                     base = paths.encode_dir(agent.cwd) if scope.all_projects else scope.encoded
                     token = encoded[len(base):] if base and encoded.startswith(base) else encoded
                     session.worktree = token.lstrip("-") or encoded
@@ -366,13 +375,20 @@ class Loader:
         )
 
 
+def _save_caches(caches: dict[str, cache_mod.Cache], skip: str = "") -> None:
+    """A cache file holds exactly what its scan saw, so a half-filled one is dropped."""
+    for encoded, cache in caches.items():
+        if encoded != skip:
+            cache.save()
+
+
 def _projects(sessions: dict[str, Session]) -> dict[str, Project]:
     """One :class:`Project` per project directory, mapped onto every session in it."""
     by_dir: dict[str, Project] = {}
     for session in sessions.values():
         if not session.project_dir:
             continue
-        encoded = os.path.basename(os.path.normpath(session.project_dir))
+        encoded = paths.encoded_of(session.project_dir)
         project = by_dir.get(encoded)
         if project is None:
             project = by_dir[encoded] = Project(encoded=encoded, path=session.project_dir)
@@ -384,7 +400,7 @@ def _projects(sessions: dict[str, Session]) -> dict[str, Project]:
             project.label = paths.decode_project_dir(project.path).rsplit("/", 1)[-1] \
                 or project.encoded
     return {
-        session.sid: by_dir[os.path.basename(os.path.normpath(session.project_dir))]
+        session.sid: by_dir[paths.encoded_of(session.project_dir)]
         for session in sessions.values() if session.project_dir
     }
 

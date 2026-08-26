@@ -187,3 +187,53 @@ def test_a_changed_transcript_is_reparsed(fake_home, fake_project, make_transcri
                              "message": {"content": "one more"}}) + "\n")
     os.utime(path, (0, 0))   # a size change alone would already do it; prove mtime counts too
     assert scan_once(scope).sessions[SID].users == 2
+
+
+def test_a_scan_that_changed_nothing_writes_nothing(fake_home, tmp_path):
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text("\n")
+    stat = os.stat(path)
+    first = Cache(ENCODED)
+    first.put(SID, stat, transcript.parse_session(str(path)))
+    first.save()
+
+    second = Cache(ENCODED)
+    assert second.get(SID, str(path), stat) is not None
+    os.unlink(cache_mod.cache_path(ENCODED))     # nothing may recreate it
+    second.save()
+
+    assert not Path(cache_mod.cache_path(ENCODED)).exists()
+
+
+def test_a_warm_rescan_leaves_the_file_untouched(fake_home, fake_project, make_transcript,
+                                                 stub_claude, tmp_path):
+    work = tmp_path / "work"
+    project_dir = fake_project(cwd=str(work))
+    for i in range(3):
+        make_transcript(project_dir, f"{i}{i}{i}{i}{i}{i}{i}{i}-0000-0000-0000-00000000000{i}")
+    scope = Scope.project(paths.resolve_dir(str(work)))
+    scan_once(scope)
+
+    written = os.stat(cache_mod.cache_path(project_dir.name))
+    scan_once(scope)
+    again = os.stat(cache_mod.cache_path(project_dir.name))
+
+    # a rewrite goes through os.replace, so a new inode would give it away
+    assert (again.st_ino, again.st_mtime_ns) == (written.st_ino, written.st_mtime_ns)
+
+
+def test_a_deleted_session_is_dropped_from_the_file(fake_home, fake_project, make_transcript,
+                                                    stub_claude, tmp_path):
+    work = tmp_path / "work"
+    project_dir = fake_project(cwd=str(work))
+    gone = make_transcript(project_dir, SID)
+    kept = "bbbbbbbb-0000-0000-0000-000000000002"
+    make_transcript(project_dir, kept)
+    scope = Scope.project(paths.resolve_dir(str(work)))
+    scan_once(scope)
+
+    os.unlink(gone)
+    scan_once(scope)
+
+    with open(cache_mod.cache_path(project_dir.name)) as fh:
+        assert set(json.load(fh)) == {kept}
