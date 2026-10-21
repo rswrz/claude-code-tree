@@ -1245,3 +1245,44 @@ def test_forking_a_live_session_asks_nothing(monkeypatch):
     instance.open_session(fork=True)
     assert asked == []
     assert scr.ran == [["claude", "--resume", "a", "--fork-session"]]
+
+
+def sdk_and_cli():
+    """One session per entrypoint, each open with a worker on it."""
+    entries = {"a": "sdk-ts", "b": "cli", "c": "sdk-cli"}
+    return Snapshot(
+        sessions={sid: Session(sid=sid, first=f"title {sid}", entrypoint=entry,
+                               mtime=1_000_000.0)
+                  for sid, entry in entries.items()},
+        agents={sid: Agent(sid=sid, live=True, status="waiting") for sid in entries},
+        roots=list(entries),
+        children={sid: [] for sid in entries},
+    )
+
+
+@pytest.mark.parametrize("query, shown", [
+    ("sdk:", ["a", "c"]),
+    ("!sdk:", ["b"]),
+    ("sdk: title", ["a", "c"]),
+])
+def test_the_sdk_token_filters_on_the_entrypoint(monkeypatch, query, shown):
+    instance = listing_app(monkeypatch, sdk_and_cli())
+    instance.state.query = query
+    instance.refilter()
+    assert in_view(instance) == shown
+
+
+@pytest.mark.parametrize("sel, says, never", [
+    (0, "SDK client", "another terminal"),
+    (1, "another terminal", "SDK client"),
+])
+def test_the_dialog_names_what_holds_the_session(monkeypatch, sel, says, never):
+    scr = LaunchingScreen()
+    instance = listing_app(monkeypatch, sdk_and_cli(), scr=scr)
+    asked = stub_confirm(monkeypatch, False)
+    instance.state.select(sel)
+    instance.open_session(fork=False)
+    assert scr.ran == []
+    assert any(says in line for line in asked[0])
+    assert not any(never in line for line in asked[0])
+

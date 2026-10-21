@@ -385,7 +385,7 @@ def is_live(session: Session, snap: Snapshot) -> bool:
 
 
 def is_live_interactive(session: Session, snap: Snapshot) -> bool:
-    """An interactive session with a pid: another terminal already has it open."""
+    """An interactive session with a pid: another terminal or SDK client has it open."""
     agent = snap.agents.get(session.sid)
     return bool(agent and agent.live and agent.kind != "background")
 

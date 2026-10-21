@@ -262,6 +262,17 @@ class TestLabel:
         assert " ⚠ no transcript" in plain(row)
         assert style_at(row, "⚠") == "MARKER"
 
+    def test_sdk_marker(self):
+        s = session("a", first="sdk work", entrypoint="sdk-ts")
+        row = rows_for(snapshot(s), flat("a"))[0]
+        assert plain(row).split("  ")[0] == "├─ sdk work sdk"
+        # the title holds the same text; only the marker after it is coloured
+        assert styled(row)[:2] == [("├─ sdk work", "NORMAL"), (" sdk", "MARKER")]
+
+    def test_a_cli_session_has_no_marker(self):
+        s = session("a", first="plain", entrypoint="cli")
+        assert plain(rows_for(snapshot(s), flat("a"))[0]).split("  ")[0] == "├─ plain"
+
     def test_a_stub_shows_no_turn_columns(self):
         s = session("a", stub=True)
         text = plain(rows_for(snapshot(s), flat("a"))[0])

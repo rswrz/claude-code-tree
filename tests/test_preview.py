@@ -259,6 +259,14 @@ class TestKeyValues:
         assert kv(rows, "branch") == "main"
         assert kv(rows, "cli") == "2.1.206"
 
+    def test_entry_of_an_sdk_session(self, transcript):
+        sid = transcript([user("hi", 0, entrypoint="sdk-ts"), assistant("ho", 1, entrypoint="cli")])
+        assert kv(preview.render(sid, Snapshot()), "entry") == "sdk-ts (hidden from claude -r)"
+
+    def test_entry_of_a_cli_session(self, transcript):
+        sid = transcript([user("hi", 0, entrypoint="cli")])
+        assert kv(preview.render(sid, Snapshot()), "entry") == "cli"
+
     def test_modes(self, transcript):
         sid = transcript([
             {"type": "agent-setting", "agentSetting": "fable"},
@@ -341,6 +349,7 @@ class TestKeyValues:
         rows = preview.render(sid, Snapshot())
         assert kv(rows, "mode") is None
         assert kv(rows, "worktree") is None
+        assert kv(rows, "entry") is None
 
 
 class TestMessages:

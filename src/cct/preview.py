@@ -13,7 +13,7 @@ import re
 
 from . import daemon, fuzzy, paths, transcript
 from .layout import KW_RE, PR_KW, badge, cwid, dw, fmt_age, fmt_ctx, fmt_dur
-from .model import Agent, Snapshot
+from .model import SDK_ENTRYPOINTS, Agent, Snapshot
 from .theme import Row, Style, merge
 
 __all__ = ["render", "render_job", "wrap", "MSG_KEEP", "MSG_MAX", "TAIL", "HEAD"]
@@ -185,7 +185,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None,
     mtime = os.path.getmtime(path)
 
     custom = ai = branch = worktree = wtpath = relocated = cwd = ""
-    effort = agentset = mode = permmode = version = ""
+    effort = agentset = mode = permmode = version = entry = ""
     models: dict[str, int] = {}
     skills: list[str] = []
     prs: list[tuple] = []
@@ -261,6 +261,9 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None,
                         effort = v.strip()
                     else:
                         permmode = v.strip()
+            ep = o.get("entrypoint")
+            if not entry and isinstance(ep, str) and ep.strip():
+                entry = ep.strip()
             sk = o.get("attributionSkill")
             if isinstance(sk, str) and sk.strip() and sk.strip() not in skills:
                 skills.append(sk.strip())
@@ -358,6 +361,7 @@ def _render_transcript(sid: str, path: str, q: fuzzy.Query | None,
     if touched:
         kv("files", f"{len(touched)} files touched")
     kv("cli", version)
+    kv("entry", f"{entry} (hidden from claude -r)" if entry in SDK_ENTRYPOINTS else entry)
     if skills:
         kv("skills", ", ".join(skills))
     if js:

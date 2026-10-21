@@ -67,7 +67,8 @@ claude-code-tree --version
 
 Enter on a live interactive session asks before it resumes it: the session is
 already open in another terminal, and two terminals on one session is rarely
-wanted. Ctrl+F never asks, because a fork is a session of its own.
+wanted. For an SDK session, the dialog says that an SDK client, for example
+Zed, holds it. Ctrl+F never asks, because a fork is a session of its own.
 
 ## Query syntax
 
@@ -80,6 +81,12 @@ The query box uses fzf's extended-search grammar in `--exact` mode:
 - case-insensitive unless the query contains an uppercase letter
 
 Titles, metadata and message bodies are all searched.
+
+`sdk:` matches sessions started through the Claude Agent SDK, and `!sdk:`
+hides them. A session is an SDK session when the first entrypoint in its
+transcript is `sdk-ts`, `sdk-py` or `sdk-cli`. Its row shows `sdk` after the
+title, and the preview shows the entrypoint. `claude -r` does not list these
+sessions. Enter resumes them with `claude --resume <id>`.
 
 ## Where the data comes from
 

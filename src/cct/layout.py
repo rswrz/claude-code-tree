@@ -189,6 +189,17 @@ def badge(agent: Agent | None) -> tuple[str, Style | None]:
     return "", None
 
 
+def _marker(s: Session) -> str:
+    """The note after the title. Ghost, stub and SDK exclude each other."""
+    if s.ghost:
+        return " ⚠ no transcript"
+    if s.stub:
+        return " ∅"
+    if s.is_sdk:
+        return " sdk"
+    return ""
+
+
 def _off_default(s: Session, default_branch: str) -> Style | None:
     # work happening away from the default branch is worth spotting at a glance
     if not default_branch or not s.branch:
@@ -234,7 +245,8 @@ def _label_spans(cell: str, prefix: str, marker: str, base: Style) -> Row:
         for i in range(m.start(), m.end()):
             styles[i] = st
     if marker:
-        i = cell.find(marker)
+        # the marker ends the label, and the title may hold the same text
+        i = cell.rfind(marker)
         if i >= 0:
             for j in range(i, i + len(marker)):
                 styles[j] = Style.MARKER
@@ -267,7 +279,7 @@ def build_rows(
     for tr in tree_rows:
         s = snap.sessions.get(tr.sid) or Session(sid=tr.sid)
         name = dtrunc(s.title, NAME_MAX)
-        marker = " ⚠ no transcript" if s.ghost else (" ∅" if s.stub else "")
+        marker = _marker(s)
         label = f"{tr.prefix}{tr.connector}{name}"
         labels.append((label, tr.prefix, marker, tr.depth))
 

@@ -509,9 +509,11 @@ class App:
             project = self.snap.project_of(sid)
             # the block label and the project name are searchable in every mode,
             # whichever of them the row and its header happen to show
+            # the row says 'sdk'; the query token spells its colon, as bg: and live: do
             self.hays.append(" ".join((plain(row),
                                        self.labels[i],
                                        project.name if project else "",
+                                       "sdk:" if session and session.is_sdk else "",
                                        session.hay if session else "")))
         self._preview_key = ()
         self.refilter()
@@ -670,14 +672,18 @@ class App:
         self.sync(force=True)
 
     def confirm_second_terminal(self, session: Session) -> bool:
-        """Resuming a session another terminal holds: the default is to leave it be."""
+        """Resuming a session that is open elsewhere: the default is to leave it be."""
         agent = self.snap.agents.get(session.sid)
         lines = [f"Session: {session.title}"]
         if agent is not None and agent.status:
             lines.append(f"Status:  {agent.status}")
-        lines += ["", "This session is already open in another terminal.",
-                  "Resuming it here puts two terminals on one session.",
-                  "", "Resume anyway?"]
+        if session.is_sdk:
+            lines += ["", "This session is open in an SDK client (e.g. Zed).",
+                      "Resuming it here puts two clients on one session."]
+        else:
+            lines += ["", "This session is already open in another terminal.",
+                      "Resuming it here puts two terminals on one session."]
+        lines += ["", "Resume anyway?"]
         return widgets.confirm(self.screen, "Session already open", lines)
 
     def new_session(self) -> None:
