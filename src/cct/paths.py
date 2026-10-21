@@ -43,6 +43,18 @@ def encode_dir(path: str) -> str:
     return path.replace("/", "-").replace(".", "-")
 
 
+# a repo's own worktrees live below this, one project directory each
+WORKTREES = "/.claude/worktrees/"
+
+
+def repo_of(cwd: str) -> str:
+    """The repo a cwd belongs to: everything below a worktree folds into it."""
+    if not cwd:
+        return ""
+    # the filesystem root is a repo like any other, and keeps its slash
+    return cwd.partition(WORKTREES)[0].rstrip("/") or "/"
+
+
 def project_dir_for(abs_dir: str) -> str:
     return os.path.join(PROJECTS_DIR, encode_dir(abs_dir))
 

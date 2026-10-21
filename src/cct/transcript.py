@@ -104,6 +104,9 @@ def parse_session(path: str, sid: str | None = None) -> Session:
                     name = worktree.get("worktreeName")
                     if isinstance(name, str) and name.strip():
                         session.worktree = name.strip()
+                    origin = worktree.get("originalCwd")
+                    if isinstance(origin, str) and origin.strip():
+                        session.origin = origin.strip()
                 continue
             if kind == "relocated":
                 cwd = rec.get("relocatedCwd")

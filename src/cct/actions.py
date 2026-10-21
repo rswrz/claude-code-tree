@@ -414,8 +414,14 @@ def dispatch(prompt: str, cwd: str = "") -> Step:
 
 
 def work_dir(session: Session, snap: Snapshot, fallback: str = "") -> str:
-    """Where a resumed session should start. Its own cwd wins."""
-    for candidate in (session.cwd, (snap.project_of(session.sid).cwd if snap.project_of(session.sid) else ""), fallback):
+    """Where a resumed session should start. Its own cwd wins.
+
+    A worktree session starts in its repo root: Claude Code does not trust a
+    worktree directory, and a resume from the root still finds the transcript.
+    """
+    project = snap.project_of(session.sid)
+    for candidate in (session.origin, paths.repo_of(session.cwd),
+                      paths.repo_of(project.cwd) if project else "", fallback):
         if candidate and os.path.isdir(candidate):
             return candidate
     return fallback or os.getcwd()

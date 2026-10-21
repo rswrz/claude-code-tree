@@ -8,7 +8,7 @@ import os
 import pytest
 
 from cct import actions
-from cct.model import Agent, Session, Snapshot
+from cct.model import Agent, Project, Session, Snapshot
 from cct.transcript import parse_session
 
 
@@ -377,6 +377,53 @@ def test_work_dir_prefers_the_session_cwd(tmp_path):
     assert actions.work_dir(session, Snapshot(), "/nowhere") == str(real)
     gone = Session(sid="q" * 36, cwd=str(tmp_path / "vanished"))
     assert actions.work_dir(gone, Snapshot(), "/fallback") == "/fallback"
+
+
+def test_work_dir_starts_a_worktree_session_in_its_original_cwd(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "wt-a"
+    worktree.mkdir(parents=True)
+    session = Session(sid="p" * 36, cwd=str(worktree), origin=str(repo))
+    assert actions.work_dir(session, Snapshot(), "/nowhere") == str(repo)
+
+
+def test_work_dir_folds_a_cd_into_a_worktree_into_its_repo(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "wt-a"
+    (worktree / "src").mkdir(parents=True)
+    session = Session(sid="p" * 36, cwd=str(worktree / "src"))
+    assert actions.work_dir(session, Snapshot(), "/nowhere") == str(repo)
+
+
+def test_work_dir_folds_the_cwd_when_the_original_cwd_is_gone(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "wt-a"
+    worktree.mkdir(parents=True)
+    session = Session(sid="p" * 36, cwd=str(worktree), origin=str(tmp_path / "moved"))
+    assert actions.work_dir(session, Snapshot(), "/nowhere") == str(repo)
+
+
+def test_work_dir_falls_back_when_the_worktree_repo_is_gone(tmp_path):
+    worktree = tmp_path / "gone" / ".claude" / "worktrees" / "wt-a"
+    session = Session(sid="p" * 36, cwd=str(worktree), origin=str(tmp_path / "gone"))
+    assert actions.work_dir(session, Snapshot(), "/fallback") == "/fallback"
+
+
+def test_work_dir_folds_the_project_cwd_of_a_worktree(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "wt-a"
+    worktree.mkdir(parents=True)
+    sid = "p" * 36
+    snap = Snapshot(projects={sid: Project(encoded="-x", path="/x", cwd=str(worktree))})
+    assert actions.work_dir(Session(sid=sid), snap, "/nowhere") == str(repo)
+
+
+def test_new_dir_starts_a_worktree_session_in_its_repo(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "wt-a"
+    worktree.mkdir(parents=True)
+    session = Session(sid="s" * 36, cwd=str(worktree))
+    assert actions.new_dir(session, Snapshot(), "/scope", all_projects=True) == str(repo)
 
 
 def test_new_dir_uses_the_scope_directory_in_project_scope(tmp_path):

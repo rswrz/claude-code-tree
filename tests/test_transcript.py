@@ -151,6 +151,15 @@ def test_worktree_name_wins_over_the_relocated_directory(tmp_path):
         == "pr420-review"
 
 
+def test_worktree_state_names_the_repo_root_it_started_from(tmp_path):
+    state = {"type": "worktree-state",
+             "worktreeSession": {"originalCwd": "/home/user/thing",
+                                 "worktreePath": "/home/user/thing/.claude/worktrees/wt-a",
+                                 "worktreeName": "wt-a"}}
+    assert transcript.parse_session(write(tmp_path, [state])).origin == "/home/user/thing"
+    assert transcript.parse_session(write(tmp_path, [user("hi")])).origin == ""
+
+
 def test_content_blocks_flatten_to_their_text(tmp_path):
     content = [{"type": "text", "text": "hello"},
                {"type": "tool_use", "name": "Bash"},

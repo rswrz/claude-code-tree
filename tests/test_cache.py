@@ -32,6 +32,7 @@ def a_session() -> Session:
         ai="guessed thing",
         branch="feat/thing",
         worktree="wt-thing",
+        origin="/home/user/thing",
         prs={353, 142},
         frames=2,
         ctx=459000,

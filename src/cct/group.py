@@ -30,21 +30,11 @@ AGE_LABELS = tuple(label for label, _ in _AGE_WINDOWS) + (_AGE_REST,)
 # unknown, which keeps a real repo of that name short
 UNKNOWN_PROJECT = "(unknown)"
 
-# the repo's own worktrees live below this, one project directory each
-_WORKTREES = "/.claude/worktrees/"
-
-
 @dataclass(frozen=True)
 class Block:
     key: str                  # '' for Group.NONE and for the unknown project
     label: str                # '' means: draw no header
     roots: list[str]
-
-
-def _repo_of(cwd: str) -> str:
-    """The repo a cwd belongs to: everything below a worktree folds into it."""
-    # the filesystem root is a repo like any other, and keeps its slash
-    return cwd.partition(_WORKTREES)[0].rstrip("/") or "/"
 
 
 def _cwd_of(snap: Snapshot, sid: str) -> str:
@@ -74,7 +64,7 @@ def _repo_owners(cwds: list[str]) -> dict[str, str]:
     for cwd in cwds:
         if not cwd:
             continue
-        repo = _repo_of(cwd)
+        repo = paths.repo_of(cwd)
         encoded = paths.encode_dir(repo)
         if owners.setdefault(encoded, repo) != repo:
             ambiguous.add(encoded)
@@ -100,7 +90,7 @@ def _project_of(snap: Snapshot, sid: str, cwd: str,
     # the whole repo path is the key, since two different repos can share a
     # basename; the label follows it, and not Project.name, which still names
     # the worktree the session ran in
-    key = _repo_of(cwd)
+    key = paths.repo_of(cwd)
     return key, key.rsplit("/", 1)[-1] or key
 
 

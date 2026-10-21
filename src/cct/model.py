@@ -25,6 +25,7 @@ class Session:
     ai: str = ""              # ai-title record
     branch: str = ""
     worktree: str = ""        # worktree name, or relocated basename
+    origin: str = ""          # repo root a worktree session started from
     prs: set[int] = field(default_factory=set)
     frames: int = 0           # artifact links
     ctx: int | None = None    # context tokens of the last main-chain turn
