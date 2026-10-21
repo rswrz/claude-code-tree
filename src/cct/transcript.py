@@ -119,6 +119,9 @@ def parse_session(path: str, sid: str | None = None) -> Session:
             branch = rec.get("gitBranch")
             if isinstance(branch, str) and branch:
                 session.branch = branch
+            entry = rec.get("entrypoint")
+            if not session.entrypoint and isinstance(entry, str) and entry:
+                session.entrypoint = entry
             cwd = rec.get("cwd")
             if isinstance(cwd, str) and cwd.strip():
                 session.cwd = cwd.strip()

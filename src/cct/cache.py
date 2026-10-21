@@ -13,7 +13,7 @@ from . import daemon, paths
 from .model import Session
 from .transcript import parse_ts
 
-CACHE_V = 1
+CACHE_V = 2
 
 
 def cache_path(encoded: str) -> str:
@@ -31,6 +31,7 @@ def to_json(session: Session) -> dict:
         "custom": session.custom,
         "ai": session.ai,
         "branch": session.branch,
+        "entrypoint": session.entrypoint,
         "worktree": session.worktree,
         "prs": sorted(session.prs),
         "frames": session.frames,
@@ -56,6 +57,7 @@ def from_json(sid: str, path: str, data: dict) -> Session:
         custom=data.get("custom") or "",
         ai=data.get("ai") or "",
         branch=data.get("branch") or "",
+        entrypoint=data.get("entrypoint") or "",
         worktree=data.get("worktree") or "",
         prs=set(data.get("prs") or ()),
         frames=int(data.get("frames") or 0),

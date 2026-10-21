@@ -282,6 +282,26 @@ def test_a_cancelled_scan_keeps_the_directories_it_finished(
         assert set(json.load(fh)) == {SIDS[0]}
 
 
+# -- what a scan lists ----------------------------------------------------
+
+def test_an_sdk_transcript_is_listed(fake_home, fake_project, make_transcript, stub_claude, tmp_path):
+    # SDK transcripts carry queue operations, no file-history snapshot, and no
+    # history.jsonl line
+    project_dir = fake_project(cwd=str(tmp_path / "work"))
+    turn = {"cwd": str(tmp_path / "work"), "timestamp": "2026-08-26T12:00:00Z"}
+    make_transcript(project_dir, SIDS[0], [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": SIDS[0]},
+        {"type": "user", "uuid": "u0", "entrypoint": "sdk-ts",
+         "message": {"role": "user", "content": "from the sdk"}} | turn,
+        {"type": "assistant", "uuid": "a0", "entrypoint": "sdk-ts",
+         "message": {"role": "assistant", "content": "hello"}} | turn,
+    ])
+    snap = store.scan_once(Scope.project(paths.resolve_dir(str(tmp_path / "work"))))
+    assert SIDS[0] in snap.roots
+    assert snap.sessions[SIDS[0]].entrypoint == "sdk-ts"
+    assert snap.sessions[SIDS[0]].is_sdk is True
+
+
 # -- paths primitives -----------------------------------------------------
 
 def test_find_transcript_takes_the_newest_copy(

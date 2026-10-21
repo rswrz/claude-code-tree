@@ -31,6 +31,7 @@ def a_session() -> Session:
         custom="The Thing",
         ai="guessed thing",
         branch="feat/thing",
+        entrypoint="sdk-ts",
         worktree="wt-thing",
         prs={353, 142},
         frames=2,
@@ -46,6 +47,7 @@ def test_a_session_survives_the_round_trip(fake_home):
     original = a_session()
     restored = cache_mod.from_json(SID, original.path, cache_mod.to_json(original))
     assert restored == original
+    assert restored.is_sdk is True
 
 
 def test_sets_and_timestamps_serialise_to_json_scalars(fake_home):

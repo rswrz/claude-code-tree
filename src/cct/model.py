@@ -7,6 +7,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Self
 
+# Entrypoints of the Claude Agent SDK. `claude -r` hides a session whose first
+# entrypoint is one of these; `claude --resume <id>` still opens it.
+SDK_ENTRYPOINTS = frozenset({"sdk-ts", "sdk-py", "sdk-cli"})
+
 
 @dataclass
 class Session:
@@ -24,6 +28,7 @@ class Session:
     custom: str = ""          # custom-title record
     ai: str = ""              # ai-title record
     branch: str = ""
+    entrypoint: str = ""      # first entrypoint in the file: cli, sdk-ts, ...
     worktree: str = ""        # worktree name, or relocated basename
     prs: set[int] = field(default_factory=set)
     frames: int = 0           # artifact links
@@ -37,6 +42,11 @@ class Session:
     @property
     def title(self) -> str:
         return self.custom or self.ai or self.first or self.sid[:8]
+
+    @property
+    def is_sdk(self) -> bool:
+        """Started through the Agent SDK. A later CLI resume does not change it."""
+        return self.entrypoint in SDK_ENTRYPOINTS
 
 
 @dataclass

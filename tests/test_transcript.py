@@ -99,6 +99,29 @@ def test_a_transcript_without_turns_is_a_stub(tmp_path):
     assert transcript.parse_session(write(tmp_path, [user("hi")])).stub is False
 
 
+def test_the_first_entrypoint_marks_an_sdk_session(tmp_path):
+    records = [{"type": "queue-operation", "operation": "enqueue"},
+               user("hi", entrypoint="sdk-ts"), assistant("ho", entrypoint="sdk-ts")]
+    session = transcript.parse_session(write(tmp_path, records))
+    assert session.entrypoint == "sdk-ts"
+    assert session.is_sdk is True
+
+
+def test_a_later_cli_resume_keeps_an_sdk_session(tmp_path):
+    records = [user("hi", entrypoint="sdk-py"), user("again", entrypoint="cli")]
+    session = transcript.parse_session(write(tmp_path, records))
+    assert session.entrypoint == "sdk-py"
+    assert session.is_sdk is True
+
+
+@pytest.mark.parametrize("entrypoint", ["cli", "claude-desktop", None])
+def test_other_entrypoints_are_not_sdk(tmp_path, entrypoint):
+    extra = {"entrypoint": entrypoint} if entrypoint else {}
+    session = transcript.parse_session(write(tmp_path, [user("hi", **extra)]))
+    assert session.entrypoint == (entrypoint or "")
+    assert session.is_sdk is False
+
+
 def test_branch_and_cwd_take_the_last_non_empty_value(tmp_path):
     records = [
         user("a", gitBranch="main", cwd="/tmp/one"),
